@@ -420,10 +420,16 @@ func (m *Manager) Start(p StartParams) error {
 		if err := os.MkdirAll(effectiveRunDir, 0755); err != nil {
 			return fmt.Errorf("create workdir: %w", err)
 		}
+		// Copy the prepared config.json into the custom workdir,
+		// because sing-box reads config.json from the -D directory.
+		destConfig := filepath.Join(effectiveRunDir, "config.json")
+		if err := copyFile(m.RunConfigPath(), destConfig); err != nil {
+			return fmt.Errorf("copy config to workdir: %w", err)
+		}
 	}
 
 	cmd := exec.Command(singboxBin, "run", "-D", effectiveRunDir)
-	cmd.Dir = m.runDir
+	cmd.Dir = effectiveRunDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
 			Uid:         0,
