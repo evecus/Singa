@@ -36,5 +36,8 @@ func (s *Store) Save(v interface{}) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(s.path, data, 0644)
 }
