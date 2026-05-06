@@ -462,6 +462,11 @@ func cleanupTunRoutes(ipv6 bool, tunDevice string) {
 func AddInterfaceIP(cidr string) {
 	set := "interface"
 	if !strings.Contains(cidr, ".") {
+		// interface6 set is only created in the nft table when IPv6 is enabled.
+		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
+		if !activeIPv6 {
+			return
+		}
 		set = "interface6"
 	}
 	if err := runCmd(fmt.Sprintf("nft add element inet singa %s { %s }", set, cidr)); err != nil {
@@ -472,6 +477,11 @@ func AddInterfaceIP(cidr string) {
 func RemoveInterfaceIP(cidr string) {
 	set := "interface"
 	if !strings.Contains(cidr, ".") {
+		// interface6 set is only created in the nft table when IPv6 is enabled.
+		// Skip silently if IPv6 was not enabled to avoid "No such file or directory" errors.
+		if !activeIPv6 {
+			return
+		}
 		set = "interface6"
 	}
 	if err := runCmd(fmt.Sprintf("nft delete element inet singa %s { %s }", set, cidr)); err != nil {
