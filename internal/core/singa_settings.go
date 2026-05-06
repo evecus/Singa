@@ -38,6 +38,7 @@ type InboundSettings struct {
 	MixedPort     int      `json:"mixedPort"`     // default 2081
 	TunInterface  string   `json:"tunInterface"`  // default "singa"
 	TunAddress    []string `json:"tunAddress"`    // default ["172.31.0.1/30","fdfe:dcba:9876::1/126"]
+	TunStack      string   `json:"tunStack"`      // "gvisor"|"system"|"mixed", default "mixed"
 }
 
 // ExperimentalSettings mirrors sing-box's experimental block.
@@ -69,6 +70,7 @@ func DefaultSingaSettings() SingaSettings {
 			MixedPort:    2081,
 			TunInterface: "singa",
 			TunAddress:   []string{"172.31.0.1/30", "fdfe:dcba:9876::1/126"},
+			TunStack:     "mixed",
 		},
 		Experimental: ExperimentalSettings{
 			CacheEnabled:   true,
@@ -109,6 +111,9 @@ func (ss SingaSettings) Filled() SingaSettings {
 	}
 	if len(ss.Inbound.TunAddress) == 0 {
 		ss.Inbound.TunAddress = d.Inbound.TunAddress
+	}
+	if ss.Inbound.TunStack == "" {
+		ss.Inbound.TunStack = d.Inbound.TunStack
 	}
 	if ss.Experimental.CachePath == "" {
 		ss.Experimental.CachePath = d.Experimental.CachePath
