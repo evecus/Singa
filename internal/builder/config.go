@@ -16,10 +16,9 @@ const (
 )
 
 // BuildConfig generates a complete sing-box config for node mode.
-// log, experimental, and managed inbounds (dns-in, tproxy-in, redirect-in,
-// tun-in) are intentionally omitted; patchConfig injects them from
-// SingaSettings at start time. Only mixed-in is emitted here because it is
-// not in managedTags and is not patched.
+// All inbounds (dns-in, mixed-in, tproxy-in, redirect-in, tun-in) are
+// intentionally omitted here; patchConfig injects them from SingaSettings
+// at start time based on the user's proxy mode selection.
 func BuildConfig(
 	routeMode RouteMode,
 	n *node.Node,
@@ -35,14 +34,9 @@ func BuildConfig(
 		return nil, fmt.Errorf("outbound: %w", err)
 	}
 
-	listenAddr := "127.0.0.1"
-	if lanProxy {
-		listenAddr = "::"
-	}
-
 	cfg := M{
 		"dns":      buildDNS(routeMode, ipv6),
-		"inbounds": buildInbounds(ports, listenAddr),
+		"inbounds": []interface{}{},
 		"outbounds": []interface{}{
 			proxyOB,
 			M{"type": "direct", "tag": "direct"},
@@ -52,22 +46,6 @@ func BuildConfig(
 	}
 
 	return json.MarshalIndent(cfg, "", "  ")
-}
-
-// ── Inbounds ───────────────────────────────────────────────────────────────
-// Only mixed-in is generated here. dns-in, tproxy-in, redirect-in, tun-in
-// are all in managedTags and will be injected by patchConfig at start time.
-
-func buildInbounds(ports Ports, listen string) []interface{} {
-	return []interface{}{
-		// Mixed (SOCKS5+HTTP) inbound for local proxy usage
-		M{
-			"tag":         "mixed-in",
-			"type":        "mixed",
-			"listen":      listen,
-			"listen_port": ports.Mixed,
-		},
-	}
 }
 
 // ── DNS ────────────────────────────────────────────────────────────────────
