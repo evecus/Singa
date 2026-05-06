@@ -12,7 +12,7 @@ import (
 // experimental / log from SingaSettings, and writes it back.
 // It is called for every config mode (node / subscription / upload)
 // just before sing-box is started.
-func patchConfig(path string, modes config.ProxyModes, ss SingaSettings, lanProxy bool) error {
+func patchConfig(path string, modes config.ProxyModes, ss SingaSettings, lanProxy bool, systemProxy bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read config for patch: %w", err)
@@ -38,7 +38,7 @@ func patchConfig(path string, modes config.ProxyModes, ss SingaSettings, lanProx
 		}
 	}
 	inbounds = removeManagedInbounds(inbounds)
-	inbounds = injectManagedInbounds(inbounds, modes, ss, lanProxy)
+	inbounds = injectManagedInbounds(inbounds, modes, ss, lanProxy, systemProxy)
 
 	inboundsRaw, err := json.Marshal(inbounds)
 	if err != nil {
@@ -72,6 +72,7 @@ func patchConfig(path string, modes config.ProxyModes, ss SingaSettings, lanProx
 // These are always removed and re-injected so settings changes take effect.
 var managedTags = map[string]bool{
 	"dns-in":      true,
+	"mixed-in":    true,
 	"redirect-in": true,
 	"tproxy-in":   true,
 	"tun-in":      true,
@@ -96,6 +97,7 @@ func injectManagedInbounds(
 	modes config.ProxyModes,
 	ss SingaSettings,
 	lanProxy bool,
+	systemProxy bool,
 ) []map[string]json.RawMessage {
 	listen := "127.0.0.1"
 	if lanProxy {
@@ -111,6 +113,16 @@ func injectManagedInbounds(
 		"listen":      listen,
 		"listen_port": in.DNSPort,
 	})
+
+	// mixed-in: only when system proxy is enabled
+	if systemProxy {
+		ibs = append(ibs, toRawMap(jsonMap{
+			"tag":         "mixed-in",
+			"type":        "mixed",
+			"listen":      listen,
+			"listen_port": in.MixedPort,
+		}))
+	}
 
 	// tproxy-in: when TCP=tproxy OR UDP=tproxy
 	if modes.NeedsTProxyInbound() {
