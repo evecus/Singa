@@ -72,6 +72,14 @@
               <textarea class="textarea input-mono" v-model="ib.tunAddressText" rows="2"
                 placeholder="172.31.0.1/30&#10;fdfe:dcba:9876::1/126"></textarea>
             </div>
+            <div class="field">
+              <label class="field-label">TUN 协议栈</label>
+              <select class="input" v-model="ib.tunStack">
+                <option value="gvisor">gvisor</option>
+                <option value="system">system</option>
+                <option value="mixed">mixed</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -212,7 +220,7 @@
             <span class="field-hint" style="margin:0">（直连中国大陆 IP，不经过 sing-box 核心）</span>
           </label>
         </div>
-        <button class="btn btn-ghost btn-sm mt-2" @click="saveProxyMode">保存偏好</button>
+        <button class="btn btn-ghost btn-sm mt-2" @click="saveProxyConfig">保存配置</button>
         <div v-if="proxyModeMsg" class="alert alert-success mt-2 text-xs">{{ proxyModeMsg }}</div>
 
         <div class="section-divider"></div>
@@ -237,7 +245,6 @@
               placeholder="192.168.1.0/24 10.0.0.100"></textarea>
           </div>
           <div class="flex gap-2">
-            <button class="btn btn-ghost btn-sm" @click="saveIPFilter">保存</button>
             <span v-if="ipfMsg" class="text-xs" :class="ipfMsg.startsWith('✓') ? 'text-green':'text-red'"
               style="align-self:center">{{ ipfMsg }}</span>
           </div>
@@ -427,6 +434,11 @@ const resolvedProxyMode = computed(() => {
 })
 
 const proxyModeMsg = ref('')
+async function saveProxyConfig() {
+  await saveProxyMode()
+  await saveIPFilter()
+}
+
 async function saveProxyMode() {
   try {
     await api('POST', '/proxy-settings', {
@@ -485,7 +497,7 @@ const singaMsg = ref('')
 
 const ib = ref({
   dnsPort: 5356, mixedPort: 2081, redirectPort: 7892, tproxyPort: 7893,
-  tunInterface: 'singa', tunAddressText: '172.31.0.1/30\nfdfe:dcba:9876::1/126',
+  tunInterface: 'singa', tunAddressText: '172.31.0.1/30\nfdfe:dcba:9876::1/126', tunStack: 'mixed',
 })
 
 const exp = ref({
@@ -509,6 +521,7 @@ async function loadSingaSettings() {
       ib.value.tproxyPort   = r.inbound.tproxyPort   || 7893
       ib.value.tunInterface = r.inbound.tunInterface || 'singa'
       ib.value.tunAddressText = (r.inbound.tunAddress || ['172.31.0.1/30','fdfe:dcba:9876::1/126']).join('\n')
+      ib.value.tunStack = r.inbound.tunStack || 'mixed'
     }
     if (r.experimental) {
       exp.value.cacheEnabled    = r.experimental.cacheEnabled !== false
@@ -537,6 +550,7 @@ async function saveSingaSettings() {
         tproxyPort:   ib.value.tproxyPort,
         tunInterface: ib.value.tunInterface,
         tunAddress:   ib.value.tunAddressText.split(/[\s,]+/).filter(Boolean),
+        tunStack:     ib.value.tunStack,
       },
       experimental: {
         cacheEnabled:    exp.value.cacheEnabled,
