@@ -330,9 +330,6 @@ const params = reactive({
 // persist params
 watch(() => ({ ...params }), (v) => savePersistedParams(v), { deep: true })
 
-// Refresh uploaded configs list when picker opens
-watch(showProfilePicker, (v) => { if (v) loadUploadedConfigs() })
-
 const canStart = computed(() => {
   if (params.configMode === 'node') return !!params.nodeId
   if (params.configMode === 'subnode') return !!params.subscriptionId && params.subNodeIdx >= 0
@@ -344,6 +341,9 @@ const canStart = computed(() => {
 // ── Profile picker ────────────────────────────────────────────────────────
 const showProfilePicker    = ref(false)
 const selectedProfileLabel = ref('')
+
+// Refresh uploaded configs list when picker opens
+watch(showProfilePicker, (v) => { if (v) loadUploadedConfigs() })
 
 function pickProfile(prof) {
   params.configMode = 'profile'
