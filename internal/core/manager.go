@@ -120,6 +120,7 @@ type Manager struct {
 
 	// resolved at Start time, kept for Stop / Status
 	activeProxySettings ProxySettings
+	activeRunDir        string // effective sing-box -D workdir, set at Start
 
 	nodeStore          *storage.Store
 	stateStore         *storage.Store
@@ -434,6 +435,7 @@ func (m *Manager) Start(p StartParams) error {
 		}
 	}
 
+	m.activeRunDir = effectiveRunDir
 	cmd := exec.Command(singboxBin, "run", "-D", effectiveRunDir)
 	cmd.Dir = effectiveRunDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -540,10 +542,33 @@ func (m *Manager) Stop() {
 			log.Printf("warn: clear system proxy: %v", err)
 		}
 	}
+	cleanRunDir(m.activeRunDir)
 	m.state = StateStopped
 	m.cmd = nil
 	m.saveState(false)
 	m.stopScheduler()
+}
+
+// cleanRunDir removes all files (not directories) inside dir.
+// Called after sing-box stops to clear generated configs, cache, etc.
+func cleanRunDir(dir string) {
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("warn: cleanRunDir read %s: %v", dir, err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if err := os.Remove(path); err != nil {
+			log.Printf("warn: cleanRunDir remove %s: %v", path, err)
+		}
+	}
 }
 
 // ── Config preparation ─────────────────────────────────────────────────────
