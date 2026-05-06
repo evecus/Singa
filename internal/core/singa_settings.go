@@ -47,7 +47,7 @@ type ExperimentalSettings struct {
 	CacheEnabled bool   `json:"cacheEnabled"` // default true
 	CachePath    string `json:"cachePath"`    // default "cache.db"
 
-	ClashAPIEnabled  bool   `json:"clashAPIEnabled"`  // default false
+	ClashAPIEnabled  bool   `json:"clashAPIEnabled"`  // default true
 	ClashAPIListen   string `json:"clashAPIListen"`   // e.g. "0.0.0.0:9090"
 	ClashAPIUI       string `json:"clashAPIUI"`       // e.g. "ui"
 	ClashAPIUIURL    string `json:"clashAPIUIURL"`    // download URL
@@ -75,9 +75,10 @@ func DefaultSingaSettings() SingaSettings {
 			TunMTU:       1500,
 		},
 		Experimental: ExperimentalSettings{
-			CacheEnabled:   true,
-			CachePath:      "cache.db",
-			ClashAPIEnabled: false,
+			CacheEnabled:    true,
+			CachePath:       "cache.db",
+			ClashAPIEnabled: true,
+			ClashAPIListen:  "0.0.0.0:9090",
 		},
 		Log: LogSettings{
 			Disabled: true,
