@@ -180,35 +180,47 @@
         <div class="field-hint" style="margin-bottom:12px">
           此处设置将覆盖仪表盘快速选择的代理模式，提供更精细的 TCP/UDP 控制。
         </div>
-        <div class="grid-2 gap-3">
-          <div class="field">
-            <label class="field-label">TCP 代理模式</label>
-            <div class="seg" style="flex-direction:column;border-radius:var(--radius);overflow:hidden">
-              <button v-for="m in tcpModeOpts" :key="m.v"
-                class="seg-btn" :class="{ on: tcpMode===m.v }"
-                style="border-right:none;border-bottom:1px solid var(--border2);text-align:left;padding:8px 12px"
-                @click="tcpMode=m.v">
-                <span style="font-weight:700">{{ m.l }}</span>
-                <span style="font-size:10px;color:var(--text3);margin-left:6px">{{ m.desc }}</span>
-              </button>
+        <!-- 系统代理开关 -->
+        <div style="margin-bottom:14px">
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:13px">
+            <div class="toggle" :class="{ on: systemProxy }" @click="systemProxy=!systemProxy"></div>
+            <span>系统代理</span>
+            <span class="field-hint" style="margin:0">（开启后仅注入 mixed-in，不设置透明代理）</span>
+          </label>
+        </div>
+
+        <!-- TCP / UDP 选择：仅系统代理关闭时显示 -->
+        <template v-if="!systemProxy">
+          <div class="grid-2 gap-3">
+            <div class="field">
+              <label class="field-label">TCP 代理模式</label>
+              <div class="seg" style="flex-direction:column;border-radius:var(--radius);overflow:hidden">
+                <button v-for="m in tcpModeOpts" :key="m.v"
+                  class="seg-btn" :class="{ on: tcpMode===m.v }"
+                  style="border-right:none;border-bottom:1px solid var(--border2);text-align:left;padding:8px 12px"
+                  @click="tcpMode=m.v">
+                  <span style="font-weight:700">{{ m.l }}</span>
+                  <span style="font-size:10px;color:var(--text3);margin-left:6px">{{ m.desc }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label">UDP 代理模式</label>
+              <div class="seg" style="flex-direction:column;border-radius:var(--radius);overflow:hidden">
+                <button v-for="m in udpModeOpts" :key="m.v"
+                  class="seg-btn" :class="{ on: udpMode===m.v }"
+                  style="border-right:none;border-bottom:1px solid var(--border2);text-align:left;padding:8px 12px"
+                  @click="udpMode=m.v">
+                  <span style="font-weight:700">{{ m.l }}</span>
+                  <span style="font-size:10px;color:var(--text3);margin-left:6px">{{ m.desc }}</span>
+                </button>
+              </div>
             </div>
           </div>
-          <div class="field">
-            <label class="field-label">UDP 代理模式</label>
-            <div class="seg" style="flex-direction:column;border-radius:var(--radius);overflow:hidden">
-              <button v-for="m in udpModeOpts" :key="m.v"
-                class="seg-btn" :class="{ on: udpMode===m.v }"
-                style="border-right:none;border-bottom:1px solid var(--border2);text-align:left;padding:8px 12px"
-                @click="udpMode=m.v">
-                <span style="font-weight:700">{{ m.l }}</span>
-                <span style="font-size:10px;color:var(--text3);margin-left:6px">{{ m.desc }}</span>
-              </button>
-            </div>
+          <div class="alert alert-info mt-3 text-xs">
+            当前组合模式：<strong>{{ resolvedProxyMode }}</strong>
           </div>
-        </div>
-        <div class="alert alert-info mt-3 text-xs">
-          当前组合模式：<strong>{{ resolvedProxyMode }}</strong>
-        </div>
+        </template>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:13px">
             <div class="toggle" :class="{ on: lanProxy }" @click="lanProxy=!lanProxy"></div>
@@ -410,20 +422,19 @@ async function installSb() {
 }
 
 // ── Proxy mode ────────────────────────────────────────────────────────────
-const tcpMode  = ref('off')
-const udpMode  = ref('off')
+const systemProxy = ref(false)
+const tcpMode  = ref('redir')
+const udpMode  = ref('tproxy')
 const lanProxy = ref(false)
 const ipv6     = ref(false)
 const bypassCN = ref(false)
 
 const tcpModeOpts = [
-  { v: 'off',    l: '禁用',   desc: '不透明代理 TCP' },
   { v: 'redir',  l: 'redir',  desc: 'iptables REDIRECT（旧方案）' },
   { v: 'tproxy', l: 'tproxy', desc: 'iptables TPROXY（推荐 Linux）' },
   { v: 'tun',    l: 'tun',    desc: 'TUN 虚拟网卡（跨平台）' },
 ]
 const udpModeOpts = [
-  { v: 'off',    l: '禁用',   desc: '不透明代理 UDP' },
   { v: 'tproxy', l: 'tproxy', desc: 'iptables TPROXY UDP' },
   { v: 'tun',    l: 'tun',    desc: 'TUN 虚拟网卡' },
 ]
@@ -431,8 +442,8 @@ const udpModeOpts = [
 const resolvedProxyMode = computed(() => {
   if (tcpMode.value === 'tun' || udpMode.value === 'tun') return 'tun'
   if (tcpMode.value === 'tproxy' || udpMode.value === 'tproxy') return 'tproxy'
-  if (tcpMode.value === 'redir') return 'redirect'
-  return 'system_proxy（仅系统代理）'
+  if (tcpMode.value === 'redir') return 'redir'
+  return '—'
 })
 
 const proxyModeMsg = ref('')
@@ -444,6 +455,7 @@ async function saveProxyConfig() {
 async function saveProxyMode() {
   try {
     await api('POST', '/proxy-settings', {
+      systemProxy: systemProxy.value,
       tcpMode:  tcpMode.value,
       udpMode:  udpMode.value,
       lanProxy: lanProxy.value,
@@ -712,8 +724,9 @@ onMounted(() => {
   loadSched()
   loadWorkDir()
   api('GET', '/proxy-settings').then(r => {
-    tcpMode.value  = r.tcpMode  || 'off'
-    udpMode.value  = r.udpMode  || 'off'
+    systemProxy.value = !!r.systemProxy
+    tcpMode.value  = r.tcpMode  || 'redir'
+    udpMode.value  = r.udpMode  || 'tproxy'
     lanProxy.value = !!r.lanProxy
     ipv6.value     = !!r.ipv6
     bypassCN.value = !!r.bypassCN
