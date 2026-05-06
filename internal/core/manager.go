@@ -446,6 +446,25 @@ func (m *Manager) Start(p StartParams) error {
 		return fmt.Errorf("start sing-box: %w", err)
 	}
 
+	// Re-apply TUN ip routes after sing-box creates the TUN device.
+	// setupRoutes() runs before sing-box starts, so the device may not exist yet.
+	if modes.NeedsTunInbound() {
+		go func() {
+			dev := ss.Inbound.TunInterface
+			if dev == "" {
+				dev = "singa"
+			}
+			for i := 0; i < 20; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if _, err := os.Stat("/sys/class/net/" + dev); err == nil {
+					firewall.ApplyTunRoutes(ps.IPv6)
+					return
+				}
+			}
+			log.Printf("warn: tun device %s did not appear within 10s", dev)
+		}()
+	}
+
 	m.cmd = cmd
 	m.state = StateRunning
 	m.errMsg = ""
