@@ -345,12 +345,27 @@ var _ = time.Now
 
 func (s *Server) updateRules(c *gin.Context) {
 	var req struct {
-		Proxy string `json:"proxy"`
+		Proxy string   `json:"proxy"`
+		Files []string `json:"files"` // if non-empty, update only these files
 	}
-	// ignore parse error — proxy is optional
+	// ignore parse error — all fields are optional
 	_ = c.ShouldBindJSON(&req)
 
-	results := updater.UpdateAll(s.srsDir, req.Proxy)
+	var results []updater.Result
+	if len(req.Files) > 0 {
+		// Selective update: look up persisted URLs from metadata
+		meta := loadRulesetMeta(s.srsDir)
+		specs := make([]updater.FileSpec, 0, len(req.Files))
+		for _, f := range req.Files {
+			specs = append(specs, updater.FileSpec{
+				File: f,
+				URL:  meta[f], // empty string falls back to built-in URL in UpdateFiles
+			})
+		}
+		results = updater.UpdateFiles(s.srsDir, req.Proxy, specs)
+	} else {
+		results = updater.UpdateAll(s.srsDir, req.Proxy)
+	}
 
 	failed := 0
 	for _, r := range results {
@@ -363,6 +378,37 @@ func (s *Server) updateRules(c *gin.Context) {
 		status = http.StatusBadGateway
 	}
 	c.JSON(status, gin.H{"results": results, "failed": failed, "total": len(results)})
+}
+
+// rulesetMetaFile returns the path of the JSON that persists per-file
+// download URLs so custom / hub-added rulesets can be re-updated later.
+func rulesetMetaFile(srsDir string) string {
+	return filepath.Join(srsDir, ".ruleset-meta.json")
+}
+
+// loadRulesetMeta loads the persisted file→URL mapping.
+// Returns an empty map on any error.
+func loadRulesetMeta(srsDir string) map[string]string {
+	data, err := os.ReadFile(rulesetMetaFile(srsDir))
+	if err != nil {
+		return map[string]string{}
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+// saveRulesetMeta persists a file→URL entry (merged with existing data).
+func saveRulesetMeta(srsDir, file, url string) {
+	m := loadRulesetMeta(srsDir)
+	m[file] = url
+	data, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(rulesetMetaFile(srsDir), data, 0644)
 }
 
 // ── sing-box management ────────────────────────────────────────────────────
@@ -713,6 +759,7 @@ func (s *Server) downloadRuleset(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	saveRulesetMeta(s.srsDir, filepath.Base(dst), req.URL)
 	c.JSON(200, gin.H{"ok": true, "file": filepath.Base(dst)})
 }
 
