@@ -638,7 +638,7 @@ func (m *Manager) prepareUploadConfig() error {
 }
 
 func (m *Manager) prepareNodeConfig(p StartParams, modes config.ProxyModes, lanProxy bool, ipv6 bool, n *node.Node, ports builder.Ports) error {
-	data, err := builder.BuildConfig(modes, p.RouteMode, n, ports, lanProxy, ipv6, m.srsDir, IsReF1ndBuild(), p.BlockAds)
+	data, err := builder.BuildConfig(p.RouteMode, n, ports, lanProxy, ipv6, m.srsDir, IsReF1ndBuild(), p.BlockAds)
 	if err != nil {
 		return fmt.Errorf("build config: %w", err)
 	}
