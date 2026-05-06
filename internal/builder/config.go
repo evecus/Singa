@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/singa/internal/config"
 	"github.com/singa/internal/node"
 )
 
@@ -17,8 +16,11 @@ const (
 )
 
 // BuildConfig generates a complete sing-box config for node mode.
+// log, experimental, and managed inbounds (dns-in, tproxy-in, redirect-in,
+// tun-in) are intentionally omitted; patchConfig injects them from
+// SingaSettings at start time. Only mixed-in is emitted here because it is
+// not in managedTags and is not patched.
 func BuildConfig(
-	modes config.ProxyModes,
 	routeMode RouteMode,
 	n *node.Node,
 	ports Ports,
@@ -39,34 +41,25 @@ func BuildConfig(
 	}
 
 	cfg := M{
-		"log":      M{"disabled": true},
 		"dns":      buildDNS(routeMode, ipv6),
-		"inbounds": buildInbounds(modes, ports, listenAddr),
+		"inbounds": buildInbounds(ports, listenAddr),
 		"outbounds": []interface{}{
 			proxyOB,
 			M{"type": "direct", "tag": "direct"},
 			M{"type": "block", "tag": "block"},
 		},
-		"route":        buildRoute(routeMode, srsDir, isReF1nd, blockAds),
-		"experimental": M{},
+		"route": buildRoute(routeMode, srsDir, isReF1nd, blockAds),
 	}
 
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
 // ── Inbounds ───────────────────────────────────────────────────────────────
-// NOTE: sniff / sniff_override_destination are removed in sing-box 1.13.0.
-// Sniffing is now handled entirely in route rules via {"action":"sniff"}.
+// Only mixed-in is generated here. dns-in, tproxy-in, redirect-in, tun-in
+// are all in managedTags and will be injected by patchConfig at start time.
 
-func buildInbounds(modes config.ProxyModes, ports Ports, listen string) []interface{} {
-	inbounds := []interface{}{
-		// DNS inbound: receives raw DNS queries for hijack-dns
-		M{
-			"tag":         "dns-in",
-			"type":        "direct",
-			"listen":      listen,
-			"listen_port": ports.DNS,
-		},
+func buildInbounds(ports Ports, listen string) []interface{} {
+	return []interface{}{
 		// Mixed (SOCKS5+HTTP) inbound for local proxy usage
 		M{
 			"tag":         "mixed-in",
@@ -75,45 +68,6 @@ func buildInbounds(modes config.ProxyModes, ports Ports, listen string) []interf
 			"listen_port": ports.Mixed,
 		},
 	}
-
-	// tproxy inbound: needed when TCP=tproxy OR UDP=tproxy.
-	// sing-box tproxy inbound handles both TCP and UDP; the nft rules will
-	// selectively redirect only the protocol(s) the user configured.
-	if modes.NeedsTProxyInbound() {
-		inbounds = append(inbounds, M{
-			"tag":         "tproxy-in",
-			"type":        "tproxy",
-			"listen":      listen,
-			"listen_port": ports.TProxy,
-		})
-	}
-
-	// redirect inbound: needed when TCP=redir.
-	// iptables/nft REDIRECT is TCP-only by design; UDP is handled separately.
-	if modes.NeedsRedirectInbound() {
-		inbounds = append(inbounds, M{
-			"tag":         "redirect-in",
-			"type":        "redirect",
-			"listen":      listen,
-			"listen_port": ports.Redirect,
-		})
-	}
-
-	// tun inbound: needed when TCP=tun OR UDP=tun.
-	// A single TUN device handles both protocols; nft marks only the
-	// protocol(s) the user configured for TUN.
-	if modes.NeedsTunInbound() {
-		inbounds = append(inbounds, M{
-			"tag":            "tun-in",
-			"type":           "tun",
-			"interface_name": "singa",
-			"address":        []string{"172.31.0.1/30", "fdfe:dcba:9876::1/126"},
-			"auto_route":     false,
-			"auto_redirect":  false,
-		})
-	}
-
-	return inbounds
 }
 
 // ── DNS ────────────────────────────────────────────────────────────────────
