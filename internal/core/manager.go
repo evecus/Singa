@@ -66,7 +66,8 @@ type StartParams struct {
 	ConfigMode     string            `json:"configMode"` // "upload" | "node" | "subnode" | "subscription" | "profile"
 	SubscriptionID string            `json:"subscriptionId"`
 	SubNodeIdx     int               `json:"subNodeIdx"`
-	ProfileID      string            `json:"profileId"`
+	ProfileID            string            `json:"profileId"`
+	UploadedConfigFile   string            `json:"uploadedConfigFile"` // filename in configs dir, for upload mode
 	ClashAPIPort   int               `json:"clashApiPort"`
 	ClashAPISecret string            `json:"clashApiSecret"`
 }
@@ -176,6 +177,8 @@ func NewManager(dataDir, runDir, srsDir string) *Manager {
 }
 
 func (m *Manager) ConfigPath() string    { return filepath.Join(m.configsDir, "config.json") }
+func (m *Manager) ConfigsDir() string    { return m.configsDir }
+func (m *Manager) UploadedConfigPath(filename string) string { return filepath.Join(m.configsDir, filename) }
 func (m *Manager) RunConfigPath() string { return filepath.Join(m.runDir, "config.json") }
 
 func (m *Manager) AutoStart() {
@@ -350,7 +353,7 @@ func (m *Manager) Start(p StartParams) error {
 
 	switch p.ConfigMode {
 	case "upload":
-		if err := m.prepareUploadConfig(); err != nil {
+		if err := m.prepareUploadConfig(p); err != nil {
 			return err
 		}
 		cfg, err := config.ParseConfig(m.RunConfigPath())
@@ -678,11 +681,16 @@ func (m *Manager) prepareSubscriptionConfig(p StartParams, modes config.ProxyMod
 	return os.WriteFile(m.RunConfigPath(), data, 0644)
 }
 
-func (m *Manager) prepareUploadConfig() error {
-	if _, err := os.Stat(m.ConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("config.json not uploaded")
+func (m *Manager) prepareUploadConfig(p StartParams) error {
+	filename := p.UploadedConfigFile
+	if filename == "" {
+		filename = "config.json"
 	}
-	return copyFile(m.ConfigPath(), m.RunConfigPath())
+	srcPath := m.UploadedConfigPath(filename)
+	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+		return fmt.Errorf("uploaded config %q not found", filename)
+	}
+	return copyFile(srcPath, m.RunConfigPath())
 }
 
 func (m *Manager) prepareNodeConfig(p StartParams, modes config.ProxyModes, lanProxy bool, ipv6 bool, n *node.Node, ports builder.Ports) error {
