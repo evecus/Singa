@@ -143,7 +143,7 @@ func injectManagedInbounds(
 			"type":           "tun",
 			"interface_name": in.TunInterface,
 			"address":        in.TunAddress,
-			"mtu":            9000,
+			"mtu":            in.TunMTU,
 			"stack":          stack,
 			"auto_route":     false,
 			"auto_redirect":  false,
