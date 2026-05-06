@@ -19,7 +19,7 @@ func SetNftConfPath(dir string) {
 	nftConfPath = filepath.Join(dir, "singa-nft.conf")
 }
 
-// ── Constants (protocol-level, not device names) ───────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const (
 	tunFwMark = "0x41"
@@ -27,15 +27,21 @@ const (
 	tunTable  = 101
 )
 
-const privateRangesV4 = "        fib daddr type { local, broadcast, anycast, multicast } return\n" +
-	"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
+// privateRangesV4 covers fib-type addresses and all RFC-reserved IPv4 ranges.
+// Used identically in proxy_rule and tcp_redirect so the two chains are consistent.
+const privateRangesV4 = "" +
+	"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
+	"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, " +
+	"169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, " +
+	"192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
 
-const privateRangesV6 = "        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
+// privateRangesV6 covers all RFC-reserved IPv6 ranges.
+// Used in proxy_rule (IPv6 traffic) and tcp_redirect (when IPv6 is enabled).
+const privateRangesV6 = "" +
+	"        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-// setup applies nft rules and ip routes for the given modes.
-// tunDevice is the user-configured TUN interface name (e.g. "singa", "tun0").
 func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) error {
 	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf)
 	if err := os.WriteFile(nftConfPath, []byte(conf), 0644); err != nil {
@@ -52,7 +58,6 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	if err := runCmd("nft -f " + nftConfPath); err != nil {
 		return err
 	}
-	// Load CN bypass set after main table is set up
 	if bypassCN {
 		cnNftPath := filepath.Join(filepath.Dir(nftConfPath), "cn-bypass.nft")
 		if _, err := os.Stat(cnNftPath); err == nil {
@@ -68,41 +73,55 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	return nil
 }
 
-// setupRoutes installs ip rule / ip route for active transparent modes.
+// setupRoutes installs ip rule / ip route entries for the active modes.
+// Only installs routes for modes that are actually in use.
 func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string) error {
-	if modes.TCP == config.TCPModeTProxy || modes.UDP == config.UDPModeTProxy {
-		cmds := []string{
-			"ip rule add fwmark 0x40/0xc0 table 100",
-			"ip route add local 0.0.0.0/0 dev lo table 100",
-		}
-		if ipv6 {
-			cmds = append(cmds,
-				"ip -6 rule add fwmark 0x40/0xc0 table 100",
-				"ip -6 route add local ::/0 dev lo table 100",
-			)
-		}
-		for _, c := range cmds {
-			if err := runCmd(c); err != nil {
-				log.Printf("firewall: tproxy route: %v", err)
-			}
+	if modes.NeedsTProxyInbound() {
+		if err := setupTProxyRoutes(ipv6); err != nil {
+			return err
 		}
 	}
+	if modes.NeedsTunInbound() {
+		if err := setupTunRoutes(ipv6, tunDevice); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	if modes.TCP == config.TCPModeTun || modes.UDP == config.UDPModeTun {
-		cmds := []string{
-			fmt.Sprintf("ip rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
-			fmt.Sprintf("ip route add default dev %s table %d", tunDevice, tunTable),
+func setupTProxyRoutes(ipv6 bool) error {
+	cmds := []string{
+		"ip rule add fwmark 0x40/0xc0 table 100",
+		"ip route add local 0.0.0.0/0 dev lo table 100",
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			"ip -6 rule add fwmark 0x40/0xc0 table 100",
+			"ip -6 route add local ::/0 dev lo table 100",
+		)
+	}
+	for _, c := range cmds {
+		if err := runCmd(c); err != nil {
+			log.Printf("firewall: tproxy route: %v", err)
 		}
-		if ipv6 {
-			cmds = append(cmds,
-				fmt.Sprintf("ip -6 rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
-				fmt.Sprintf("ip -6 route add default dev %s table %d", tunDevice, tunTable),
-			)
-		}
-		for _, c := range cmds {
-			if err := runCmd(c); err != nil {
-				log.Printf("firewall: tun route: %v", err)
-			}
+	}
+	return nil
+}
+
+func setupTunRoutes(ipv6 bool, tunDevice string) error {
+	cmds := []string{
+		fmt.Sprintf("ip rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+		fmt.Sprintf("ip route add default dev %s table %d", tunDevice, tunTable),
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			fmt.Sprintf("ip -6 rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+			fmt.Sprintf("ip -6 route add default dev %s table %d", tunDevice, tunTable),
+		)
+	}
+	for _, c := range cmds {
+		if err := runCmd(c); err != nil {
+			log.Printf("firewall: tun route: %v", err)
 		}
 	}
 	return nil
@@ -110,6 +129,10 @@ func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string) error {
 
 // ── IP filter set ──────────────────────────────────────────────────────────
 
+// buildIPFilterNft builds the nft set definition and rule snippet for the
+// IP filter feature.  Only IPv4 addresses/CIDRs are accepted; IPv6 entries
+// are silently skipped because the set type is ipv4_addr and mixing them
+// would cause nft to error out and leave the machine unprotected.
 func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSnippet string) {
 	if ipf.Mode == ipfilter.ModeOff || !lanProxy || strings.TrimSpace(ipf.IPs) == "" {
 		return "", ""
@@ -118,17 +141,37 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 	var elems []string
 	for _, p := range parts {
 		if strings.Contains(p, "/") {
-			if _, _, err := net.ParseCIDR(p); err == nil {
-				elems = append(elems, p)
+			// CIDR — parse and verify it is IPv4
+			ip, _, err := net.ParseCIDR(p)
+			if err != nil {
+				continue
 			}
-		} else if ip := net.ParseIP(p); ip != nil {
+			if ip.To4() == nil {
+				// IPv6 CIDR — skip; adding to an ipv4_addr set causes nft error
+				log.Printf("firewall: ip_filter: skipping IPv6 CIDR %s (only IPv4 supported)", p)
+				continue
+			}
+			elems = append(elems, p)
+		} else {
+			ip := net.ParseIP(p)
+			if ip == nil {
+				continue
+			}
+			if ip.To4() == nil {
+				// IPv6 address — skip for the same reason
+				log.Printf("firewall: ip_filter: skipping IPv6 address %s (only IPv4 supported)", p)
+				continue
+			}
 			elems = append(elems, p)
 		}
 	}
 	if len(elems) == 0 {
 		return "", ""
 	}
-	setDef = fmt.Sprintf("    set ip_filter {\n        type ipv4_addr\n        flags interval\n        auto-merge\n        elements = { %s }\n    }\n", strings.Join(elems, ", "))
+	setDef = fmt.Sprintf(
+		"    set ip_filter {\n        type ipv4_addr\n        flags interval\n        auto-merge\n        elements = { %s }\n    }\n",
+		strings.Join(elems, ", "),
+	)
 	switch ipf.Mode {
 	case ipfilter.ModeBlacklist:
 		ruleSnippet = "        ip saddr @ip_filter return\n"
@@ -145,8 +188,13 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 	var s strings.Builder
 
 	s.WriteString("table inet singa {\n")
+
+	// interface set is always present (populated by SyncLocalIPs after nft -f).
 	s.WriteString("    set interface {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n")
-	s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+	// interface6 is only defined when IPv6 is enabled so it is actually used.
+	if ipv6 {
+		s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+	}
 
 	if ipfSetDef != "" {
 		s.WriteString(ipfSetDef)
@@ -220,7 +268,6 @@ func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, byp
 		s.WriteString(ipfRule)
 	}
 
-	// CN bypass: skip proxying traffic to China mainland IPs
 	if bypassCN {
 		s.WriteString("        ip daddr @cn_bypass return\n")
 		if ipv6 {
@@ -252,6 +299,7 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_pre {\n")
 
+	// Early-return: skip traffic that originates from the proxy itself.
 	if modes.NeedsTunInbound() {
 		s.WriteString(fmt.Sprintf("        iifname \"%s\" return\n", tunDevice))
 	}
@@ -259,6 +307,9 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 		s.WriteString("        iifname \"lo\" mark & 0xc0 != 0x40 return\n")
 	}
 
+	// LAN proxy: intercept forwarded traffic (non-local src AND non-local dst).
+	// Without lanProxy this chain only handles the tproxy redirect below, which
+	// acts on packets already marked by proxy_out (output hook, local traffic).
 	if lanProxy {
 		if ipv6 {
 			s.WriteString("        meta nfproto { ipv4, ipv6 } meta l4proto { tcp, udp } fib saddr type != local fib daddr type != local jump proxy_rule\n")
@@ -267,6 +318,7 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 		}
 	}
 
+	// Redirect marked packets to the tproxy inbound.
 	if modes.NeedsTProxyInbound() {
 		s.WriteString(fmt.Sprintf("        meta nfproto ipv4 meta l4proto { tcp, udp } mark & 0xc0 == 0x40 tproxy ip to 127.0.0.1:%d\n", ports.TProxy))
 		if ipv6 {
@@ -311,19 +363,24 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 `, gid, ports.DNS, dnsV4, dnsV6))
 
 	if modes.TCP == config.TCPModeRedir {
+		// tcp_redirect uses the shared privateRangesV4 constant so it stays in
+		// sync with proxy_rule.  When IPv6 is enabled, privateRangesV6 is also
+		// added so we don't accidentally redirect link-local / ULA TCP traffic.
 		nfproto := "meta nfproto ipv4"
 		if ipv6 {
 			nfproto = "meta nfproto { ipv4, ipv6 }"
 		}
+		ipv6Ranges := ""
+		if ipv6 {
+			ipv6Ranges = privateRangesV6
+		}
 		s.WriteString(fmt.Sprintf(`
     chain tcp_redirect {
         skgid %d return
-        fib daddr type { local, broadcast, anycast, multicast } return
-        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return
-        ip daddr @interface return
+%s%s        ip daddr @interface return
         %s meta l4proto tcp redirect to :%d
     }
-`, gid, nfproto, ports.Redirect))
+`, gid, privateRangesV4, ipv6Ranges, nfproto, ports.Redirect))
 	}
 
 	s.WriteString("\n    chain prerouting_nat {\n")
@@ -347,37 +404,55 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 
 // ── Cleanup ────────────────────────────────────────────────────────────────
 
-// cleanup tears down nft table and ip routes using the given tunDevice name.
-func cleanup(tunDevice string) {
+// cleanup tears down only the nft table and ip routes that were actually
+// installed for the given modes.  Passing the modes used at Apply() time
+// avoids spurious "ip rule del" errors when those routes were never added.
+func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
 	_ = runCmd("nft delete table inet singa")
-	cleanupTproxyRoutes()
-	cleanupTunRoutes(tunDevice)
+
+	if modes.NeedsTProxyInbound() {
+		cleanupTProxyRoutes(ipv6)
+	}
+	if modes.NeedsTunInbound() {
+		cleanupTunRoutes(ipv6, tunDevice)
+	}
+
 	if nftConfPath != "" {
 		_ = os.Remove(nftConfPath)
 	}
 }
 
-func cleanupTproxyRoutes() {
-	for _, c := range []string{
+func cleanupTProxyRoutes(ipv6 bool) {
+	cmds := []string{
 		"ip rule del fwmark 0x40/0xc0 table 100",
 		"ip route del local 0.0.0.0/0 dev lo table 100",
-		"ip -6 rule del fwmark 0x40/0xc0 table 100",
-		"ip -6 route del local ::/0 dev lo table 100",
-	} {
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			"ip -6 rule del fwmark 0x40/0xc0 table 100",
+			"ip -6 route del local ::/0 dev lo table 100",
+		)
+	}
+	for _, c := range cmds {
 		_ = runCmd(c)
 	}
 }
 
-func cleanupTunRoutes(tunDevice string) {
+func cleanupTunRoutes(ipv6 bool, tunDevice string) {
 	if tunDevice == "" {
 		tunDevice = "singa"
 	}
-	for _, c := range []string{
+	cmds := []string{
 		fmt.Sprintf("ip rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
 		fmt.Sprintf("ip route del default dev %s table %d", tunDevice, tunTable),
-		fmt.Sprintf("ip -6 rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
-		fmt.Sprintf("ip -6 route del default dev %s table %d", tunDevice, tunTable),
-	} {
+	}
+	if ipv6 {
+		cmds = append(cmds,
+			fmt.Sprintf("ip -6 rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
+			fmt.Sprintf("ip -6 route del default dev %s table %d", tunDevice, tunTable),
+		)
+	}
+	for _, c := range cmds {
 		_ = runCmd(c)
 	}
 }

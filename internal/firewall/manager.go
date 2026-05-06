@@ -12,8 +12,16 @@ import (
 var mu sync.Mutex
 
 // activeTunDevice remembers the tun interface name used in the last Apply()
-// so that Stop() / Cleanup() can remove the correct ip route/rule entries.
+// so that Stop() / cleanup() can remove the correct ip route/rule entries.
 var activeTunDevice string
+
+// activeModes remembers which proxy modes were active so cleanup only tears
+// down the routes that were actually installed, avoiding spurious errors when
+// running ip rule/route del on entries that were never added.
+var activeModes config.ProxyModes
+
+// activeIPv6 remembers whether IPv6 routes were installed.
+var activeIPv6 bool
 
 // Ports holds the listen ports that nftables needs to know about.
 type Ports struct {
@@ -30,12 +38,14 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	defer mu.Unlock()
 
 	SetNftConfPath(dataDir)
-	cleanup(activeTunDevice)
+	cleanup(activeModes, activeIPv6, activeTunDevice)
 
 	if tunDevice == "" {
 		tunDevice = "singa"
 	}
 	activeTunDevice = tunDevice
+	activeModes = modes
+	activeIPv6 = ipv6
 
 	if modes.IsSystemProxyOnly() {
 		log.Println("firewall: system_proxy only — no nftables rules")
@@ -51,20 +61,22 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 }
 
 // ApplyTunRoutes re-adds the ip rule/route entries for TUN mode.
-// Call this after sing-box has started and created the TUN device.
+// Called after sing-box has started and created the TUN device.
 func ApplyTunRoutes(ipv6 bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	if activeTunDevice == "" {
 		return
 	}
-	setupRoutes(config.ProxyModes{TCP: config.TCPModeTun, UDP: config.UDPModeTun}, ipv6, activeTunDevice)
+	setupTunRoutes(ipv6, activeTunDevice)
 }
 
-// Stop tears down nftables rules using the last known tun device name.
+// Stop tears down nftables rules and ip routes for the last active modes.
 func Stop() {
 	mu.Lock()
 	defer mu.Unlock()
-	cleanup(activeTunDevice)
+	cleanup(activeModes, activeIPv6, activeTunDevice)
 	activeTunDevice = ""
+	activeModes = config.ProxyModes{}
+	activeIPv6 = false
 }
