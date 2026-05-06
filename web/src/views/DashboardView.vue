@@ -300,14 +300,15 @@ const stateClass = computed(() => ({
 }[status.value.state] || ''))
 
 // Global proxy settings loaded from backend
-const proxySettings = ref({ tcpMode: 'off', udpMode: 'off', lanProxy: false, ipv6: false })
+const proxySettings = ref({ systemProxy: false, tcpMode: 'redir', udpMode: 'tproxy', lanProxy: false, ipv6: false })
 
 const currentProxyModeLabel = computed(() => {
   const ps = proxySettings.value
+  if (ps.systemProxy) return '系统代理'
   if (ps.tcpMode === 'tun' || ps.udpMode === 'tun') return 'TUN 虚拟网卡'
   if (ps.tcpMode === 'tproxy' || ps.udpMode === 'tproxy') return 'TPROXY'
   if (ps.tcpMode === 'redir') return 'redir'
-  return '系统代理'
+  return '—'
 })
 
 // Persist dashboard params to localStorage
