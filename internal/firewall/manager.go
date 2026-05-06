@@ -50,6 +50,17 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	return nil
 }
 
+// ApplyTunRoutes re-adds the ip rule/route entries for TUN mode.
+// Call this after sing-box has started and created the TUN device.
+func ApplyTunRoutes(ipv6 bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	if activeTunDevice == "" {
+		return
+	}
+	setupRoutes(config.ProxyModes{TCP: config.TCPModeTun, UDP: config.UDPModeTun}, ipv6, activeTunDevice)
+}
+
 // Stop tears down nftables rules using the last known tun device name.
 func Stop() {
 	mu.Lock()
