@@ -68,17 +68,21 @@
               <input class="input input-mono" v-model="ib.tunInterface" placeholder="singa" />
             </div>
             <div class="field">
-              <label class="field-label">TUN 地址（每行一个）</label>
-              <textarea class="textarea input-mono" v-model="ib.tunAddressText" rows="2"
-                placeholder="172.31.0.1/30&#10;fdfe:dcba:9876::1/126"></textarea>
-            </div>
-            <div class="field">
               <label class="field-label">TUN 协议栈</label>
               <select class="input" v-model="ib.tunStack">
                 <option value="gvisor">gvisor</option>
                 <option value="system">system</option>
                 <option value="mixed">mixed</option>
               </select>
+            </div>
+            <div class="field">
+              <label class="field-label">TUN MTU</label>
+              <input class="input input-mono" type="number" v-model.number="ib.tunMTU" placeholder="1500" />
+            </div>
+            <div class="field">
+              <label class="field-label">TUN 地址（每行一个）</label>
+              <textarea class="textarea input-mono" v-model="ib.tunAddressText" rows="2"
+                placeholder="172.31.0.1/30&#10;fdfe:dcba:9876::1/126"></textarea>
             </div>
           </div>
         </div>
@@ -220,9 +224,6 @@
             <span class="field-hint" style="margin:0">（直连中国大陆 IP，不经过 sing-box 核心）</span>
           </label>
         </div>
-        <button class="btn btn-ghost btn-sm mt-2" @click="saveProxyConfig">保存配置</button>
-        <div v-if="proxyModeMsg" class="alert alert-success mt-2 text-xs">{{ proxyModeMsg }}</div>
-
         <div class="section-divider"></div>
 
         <!-- 局域网 IP 过滤 -->
@@ -244,10 +245,11 @@
             <textarea class="textarea" v-model="ipfIPs" rows="2"
               placeholder="192.168.1.0/24 10.0.0.100"></textarea>
           </div>
-          <div class="flex gap-2">
-            <span v-if="ipfMsg" class="text-xs" :class="ipfMsg.startsWith('✓') ? 'text-green':'text-red'"
-              style="align-self:center">{{ ipfMsg }}</span>
-          </div>
+        </div>
+        <div class="flex items-center gap-2" style="margin-top:4px">
+          <button class="btn btn-ghost btn-sm" @click="saveProxyConfig">保存配置</button>
+          <span v-if="proxyModeMsg" class="text-xs" :class="proxyModeMsg.startsWith('✓') ? 'text-green':'text-red'">{{ proxyModeMsg }}</span>
+          <span v-if="ipfMsg" class="text-xs" :class="ipfMsg.startsWith('✓') ? 'text-green':'text-red'">{{ ipfMsg }}</span>
         </div>
       </div>
 
@@ -497,7 +499,7 @@ const singaMsg = ref('')
 
 const ib = ref({
   dnsPort: 5356, mixedPort: 2081, redirectPort: 7892, tproxyPort: 7893,
-  tunInterface: 'singa', tunAddressText: '172.31.0.1/30\nfdfe:dcba:9876::1/126', tunStack: 'mixed',
+  tunInterface: 'singa', tunAddressText: '172.31.0.1/30\nfdfe:dcba:9876::1/126', tunStack: 'mixed', tunMTU: 1500,
 })
 
 const exp = ref({
@@ -522,6 +524,7 @@ async function loadSingaSettings() {
       ib.value.tunInterface = r.inbound.tunInterface || 'singa'
       ib.value.tunAddressText = (r.inbound.tunAddress || ['172.31.0.1/30','fdfe:dcba:9876::1/126']).join('\n')
       ib.value.tunStack = r.inbound.tunStack || 'mixed'
+      ib.value.tunMTU = r.inbound.tunMTU || 1500
     }
     if (r.experimental) {
       exp.value.cacheEnabled    = r.experimental.cacheEnabled !== false
@@ -551,6 +554,7 @@ async function saveSingaSettings() {
         tunInterface: ib.value.tunInterface,
         tunAddress:   ib.value.tunAddressText.split(/[\s,]+/).filter(Boolean),
         tunStack:     ib.value.tunStack,
+        tunMTU:       ib.value.tunMTU || 1500,
       },
       experimental: {
         cacheEnabled:    exp.value.cacheEnabled,
