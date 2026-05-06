@@ -24,11 +24,8 @@
         </div>
       </div>
 
-      <!-- ══════════════════════════════════════════════════════════════
-           NODE MODE
-      ══════════════════════════════════════════════════════════════ -->
+      <!-- NODE MODE -->
       <template v-if="mode === 'node'">
-
         <div class="section">
           <div class="section-title-row">
             <span class="section-title">节点列表</span>
@@ -50,7 +47,6 @@
             </div>
           </div>
         </div>
-
         <div class="section">
           <div class="section-title">代理模式</div>
           <div class="proxy-grid">
@@ -63,7 +59,6 @@
             </button>
           </div>
         </div>
-
         <div class="section">
           <div class="section-title">路由模式</div>
           <div class="route-grid">
@@ -76,7 +71,6 @@
             </button>
           </div>
         </div>
-
         <div class="section">
           <div class="toggle-group">
             <label class="toggle-row" :class="{ disabled: isRunning }">
@@ -111,14 +105,10 @@
             </label>
           </div>
         </div>
-
       </template>
 
-      <!-- ══════════════════════════════════════════════════════════════
-           SUBSCRIPTION MODE
-      ══════════════════════════════════════════════════════════════ -->
+      <!-- SUBSCRIPTION MODE -->
       <template v-if="mode === 'subscription'">
-
         <div class="section">
           <div class="section-title-row">
             <span class="section-title">订阅列表</span>
@@ -130,7 +120,6 @@
           <div class="sub-list">
             <div v-for="sub in subsStore.subs" :key="sub.id"
               class="sub-card" :class="{ active: selectedSubId === sub.id }">
-
               <div class="sub-header" :class="{ selected: selectedSubId === sub.id }"
                 @click="selectedSubId = selectedSubId === sub.id ? null : sub.id">
                 <span class="sub-icon">📦</span>
@@ -156,7 +145,6 @@
                     @click="deleteSub(sub.id)" title="删除">✕</button>
                 </div>
               </div>
-
               <div v-if="selectedSubId === sub.id" class="sub-expanded">
                 <div v-if="!sub.nodeCount" class="sub-no-nodes">
                   <span>节点缓存为空</span>
@@ -168,17 +156,14 @@
                 </div>
                 <template v-else>
                   <div class="sub-proxy-count">
-                    ✓ {{ sub.nodeCount }} 个节点已缓存，将全部注入 selector / urltest
+                    ✓ {{ sub.nodeCount }} 个节点已缓存
                   </div>
                   <div class="sub-start-hint">选中此订阅后点击下方「启动」即可</div>
                 </template>
               </div>
-
             </div>
           </div>
         </div>
-
-        <!-- proxy mode for subscription -->
         <div class="section" v-if="selectedSubId">
           <div class="section-title">代理模式</div>
           <div class="proxy-grid">
@@ -191,28 +176,12 @@
             </button>
           </div>
         </div>
-
       </template>
 
-      <!-- ══════════════════════════════════════════════════════════════
-           UPLOAD MODE
-      ══════════════════════════════════════════════════════════════ -->
+      <!-- UPLOAD MODE -->
       <template v-if="mode === 'upload'">
-
         <div class="section">
-          <div class="section-title-row">
-            <span class="section-title">配置文件</span>
-          </div>
-          <div v-if="uploadInfo" class="info-grid">
-            <span class="info-k">状态</span>
-            <span class="info-v">{{ uploadInfo.status }}</span>
-            <span class="info-k">代理模式</span>
-            <span class="info-v">{{ uploadInfo.proxyMode || '—' }}</span>
-            <span class="info-k">入站端口</span>
-            <span class="info-v">{{ uploadInfo.port || '—' }}</span>
-          </div>
-          <div v-else class="empty-tip">还未上传配置文件</div>
-
+          <div class="section-title">上传配置文件</div>
           <label class="upload-drop" :class="{ over: dragOver }"
             @dragover.prevent="dragOver = true"
             @dragleave="dragOver = false"
@@ -220,28 +189,37 @@
             <input type="file" accept=".json" style="display:none"
               @change="onFileSelect" ref="fileInput" />
             <span class="upload-icon">📁</span>
-            <span class="upload-label">拖拽或点击上传 sing-box JSON 配置文件</span>
+            <span class="upload-label">拖拽或点击上传 sing-box JSON 配置</span>
           </label>
           <div v-if="uploadErr" class="error-bar" style="margin-top:6px">{{ uploadErr }}</div>
           <div v-if="uploadOk"  class="info-bar"  style="margin-top:6px">{{ uploadOk }}</div>
         </div>
 
-        <div class="section" v-if="uploadInfo">
-          <div class="section-title">透明代理模式</div>
-          <div class="proxy-grid">
-            <button v-for="pm in proxyModes" :key="pm.v"
-              class="grid-btn" :class="{ on: proxyMode === pm.v }"
-              :disabled="isRunning" @click="proxyMode = pm.v">
-              <span class="grid-icon">{{ pm.icon }}</span>
-              <span class="grid-name">{{ pm.name }}</span>
-              <span class="grid-desc">{{ pm.desc }}</span>
-            </button>
+        <div class="section">
+          <div class="section-title-row">
+            <span class="section-title">已上传配置</span>
+            <span class="config-count">{{ uploadedConfigs.length }} 个文件</span>
+          </div>
+          <div v-if="uploadedConfigs.length === 0" class="empty-tip">暂无上传配置</div>
+          <div v-else class="config-list">
+            <div v-for="cfg in uploadedConfigs" :key="cfg.filename" class="config-item">
+              <div class="config-item-header">
+                <span class="config-filename">{{ cfg.filename }}</span>
+                <div class="config-actions">
+                  <button class="icon-btn secondary" @click="viewConfig(cfg)" title="查看/编辑">✎</button>
+                  <button class="icon-btn danger" @click="deleteConfig(cfg.filename)" title="删除">✕</button>
+                </div>
+              </div>
+              <div class="config-meta">
+                <span>{{ fmtSize(cfg.size) }}</span>
+                <span>{{ fmtTime(cfg.updatedAt) }}</span>
+                <span v-if="cfg.inbounds && cfg.inbounds.length">{{ cfg.inbounds.length }} 个入站</span>
+              </div>
+            </div>
           </div>
         </div>
-
       </template>
 
-      <!-- ── Error / running info ─────────────────────────────────────── -->
       <div v-if="startError" class="error-bar">{{ startError }}</div>
 
       <div v-if="isRunning && statusStore.status.ports" class="info-grid">
@@ -259,7 +237,6 @@
         </template>
       </div>
 
-      <!-- ── Action ────────────────────────────────────────────────────── -->
       <div class="section action-section">
         <button v-if="!isRunning"
           class="btn-start" :disabled="!canStart || starting" @click="doStart">
@@ -270,9 +247,9 @@
         </button>
       </div>
 
-    </div><!-- /sidebar -->
+    </div>
 
-    <!-- ── Import nodes modal ─────────────────────────────────────────── -->
+    <!-- Import nodes modal -->
     <div v-if="showImport" class="mask" @click.self="showImport = false">
       <div class="modal">
         <div class="modal-head">
@@ -300,11 +277,31 @@
       </div>
     </div>
 
-    <!-- ── SubWizard ──────────────────────────────────────────────────── -->
     <SubWizard v-if="showWizard"
       :sub="editingSub"
       @close="showWizard = false"
       @saved="onWizardSaved" />
+
+    <!-- 查看/编辑配置弹窗 -->
+    <div v-if="editingConfig" class="mask" @click.self="closeEditor">
+      <div class="modal modal-wide">
+        <div class="modal-head">
+          <span>{{ editingConfig.filename }}</span>
+          <button class="modal-x" @click="closeEditor">✕</button>
+        </div>
+        <div class="modal-body" style="padding:0;display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <textarea class="json-editor" v-model="editingContent" spellcheck="false"></textarea>
+          <div v-if="editErr" class="error-bar" style="margin:8px 12px 0">{{ editErr }}</div>
+          <div v-if="editOk"  class="info-bar"  style="margin:8px 12px 0">{{ editOk }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-cancel" @click="closeEditor">关闭</button>
+          <button class="btn-ok" :disabled="saving" @click="saveEdit">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
   </div>
 </template>
@@ -321,11 +318,8 @@ const subsStore   = useSubsStore()
 const logsStore   = useLogsStore()
 
 const isRunning = computed(() => statusStore.isRunning)
+const mode = ref('node')
 
-// ── Mode ─────────────────────────────────────────────────────────────────────
-const mode = ref('node') // 'node' | 'subscription' | 'upload'
-
-// ── Shared options ────────────────────────────────────────────────────────────
 const proxyMode = ref('system_proxy')
 const routeMode = ref('whitelist')
 const lanProxy  = ref(false)
@@ -344,7 +338,7 @@ const routeModes = [
   { v: 'global',    icon: '🌍',  name: '全局代理', desc: '所有流量走代理' },
 ]
 
-// ── Node mode ─────────────────────────────────────────────────────────────────
+// Node mode
 const selectedNodeId = ref(null)
 const showImport     = ref(false)
 const importText     = ref('')
@@ -361,7 +355,6 @@ async function doImport() {
     if ((res.nodes || []).length > 0) {
       importText.value = ''
       showImport.value = false
-      // select the last imported node automatically
       if (nodesStore.nodes.length > 0) {
         selectedNodeId.value = nodesStore.nodes[nodesStore.nodes.length - 1].id
       }
@@ -378,29 +371,21 @@ async function deleteNode(id) {
   await nodesStore.deleteNode(id)
 }
 
-// ── Subscription mode ──────────────────────────────────────────────────────────
+// Subscription mode
 const selectedSubId = ref(null)
 const showWizard    = ref(false)
 const editingSub    = ref(null)
 
-function openWizard(sub) {
-  editingSub.value = sub
-  showWizard.value = true
-}
+function openWizard(sub) { editingSub.value = sub; showWizard.value = true }
 
 async function onWizardSaved(sub) {
   showWizard.value = false
   await subsStore.load()
   selectedSubId.value = sub.id
-  if (!sub.nodeCount) {
-    await refreshSub(sub.id)
-  }
+  if (!sub.nodeCount) await refreshSub(sub.id)
 }
 
-async function refreshSub(id) {
-  try { await subsStore.update(id) } catch {}
-}
-
+async function refreshSub(id) { try { await subsStore.update(id) } catch {} }
 async function deleteSub(id) {
   if (selectedSubId.value === id) selectedSubId.value = null
   await subsStore.remove(id)
@@ -412,124 +397,146 @@ function fmtTime(iso) {
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   })
 }
+function fmtSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+}
 
-// ── Upload mode ────────────────────────────────────────────────────────────────
-const uploadInfo = ref(null)
+// Upload mode
+const uploadedConfigs = ref([])
 const uploadErr  = ref('')
 const uploadOk   = ref('')
 const dragOver   = ref(false)
 const fileInput  = ref(null)
 
-async function loadConfigInfo() {
-  try { uploadInfo.value = await api('GET', '/config/info') } catch {}
+function getAuthHeaders() {
+  const token = localStorage.getItem('singa_token') || ''
+  return token ? { 'X-Auth-Token': token } : {}
+}
+
+async function loadUploadedConfigs() {
+  try { uploadedConfigs.value = await api('GET', '/config/list') } catch {}
 }
 
 async function uploadConfig(file) {
   uploadErr.value = ''; uploadOk.value = ''
   if (!file) return
-  if (!file.name.endsWith('.json')) { uploadErr.value = '请上传 .json 文件'; return }
-  try { JSON.parse(await file.text()) } catch { uploadErr.value = 'JSON 格式错误'; return }
+  if (!file.name.endsWith('.json')) { uploadErr.value = '只允许上传 .json 文件'; return }
   try {
     const fd = new FormData()
-    fd.append('file', file)
-    const res = await fetch('/api/config', { method: 'POST', body: fd })
+    fd.append('config', file)
+    const res = await fetch('/api/config', {
+      method: 'POST', body: fd,
+      headers: getAuthHeaders()
+    })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error)
-    uploadOk.value = '✓ 上传成功'
-    await loadConfigInfo()
+    uploadOk.value = `✓ 上传成功：${data.filename}`
+    await loadUploadedConfigs()
   } catch (e) { uploadErr.value = '✕ ' + e.message }
 }
 
-function onFileSelect(e) { uploadConfig(e.target.files[0]) }
+function onFileSelect(e) { uploadConfig(e.target.files[0]); e.target.value = '' }
 function onDrop(e) { dragOver.value = false; uploadConfig(e.dataTransfer.files[0]) }
 
-// ── Can start ──────────────────────────────────────────────────────────────────
+async function deleteConfig(filename) {
+  if (!confirm('确定删除 ' + filename + '？')) return
+  try {
+    await api('DELETE', '/config/' + encodeURIComponent(filename))
+    await loadUploadedConfigs()
+  } catch (e) { alert('删除失败：' + e.message) }
+}
+
+// Editor
+const editingConfig  = ref(null)
+const editingContent = ref('')
+const editErr        = ref('')
+const editOk         = ref('')
+const saving         = ref(false)
+
+async function viewConfig(cfg) {
+  editErr.value = ''; editOk.value = ''
+  try {
+    const res = await fetch('/api/config/raw/' + encodeURIComponent(cfg.filename), {
+      headers: getAuthHeaders()
+    })
+    const text = await res.text()
+    editingContent.value = JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    editingContent.value = ''
+  }
+  editingConfig.value = cfg
+}
+
+function closeEditor() {
+  editingConfig.value = null
+  editingContent.value = ''
+  editErr.value = ''
+  editOk.value = ''
+}
+
+async function saveEdit() {
+  editErr.value = ''; editOk.value = ''
+  try { JSON.parse(editingContent.value) } catch { editErr.value = 'JSON 格式错误'; return }
+  saving.value = true
+  try {
+    const res = await fetch('/api/config/raw/' + encodeURIComponent(editingConfig.value.filename), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: editingContent.value
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error)
+    editOk.value = '✓ 已保存'
+    await loadUploadedConfigs()
+  } catch (e) { editErr.value = '✕ ' + e.message }
+  finally { saving.value = false }
+}
+
+const selectedSub = computed(() => subsStore.subs.find(s => s.id === selectedSubId.value) ?? null)
+
 const canStart = computed(() => {
   if (mode.value === 'node')         return !!selectedNodeId.value
   if (mode.value === 'subscription') return !!selectedSubId.value && !!selectedSub.value?.nodeCount
-  if (mode.value === 'upload')       return !!uploadInfo.value
+  if (mode.value === 'upload')       return uploadedConfigs.value.length > 0
   return false
 })
 
-const selectedSub = computed(() =>
-  subsStore.subs.find(s => s.id === selectedSubId.value) ?? null
-)
-
-// ── Start / Stop ───────────────────────────────────────────────────────────────
 const starting   = ref(false)
 const startError = ref('')
 
 async function doStart() {
   if (!canStart.value) return
-  starting.value = true
-  startError.value = ''
+  starting.value = true; startError.value = ''
   try {
-    const base = {
-      proxyMode: proxyMode.value,
-      lanProxy:  lanProxy.value,
-      ipv6:      ipv6.value,
-      blockAds:  blockAds.value,
-      routeMode: routeMode.value,
-    }
-
+    const base = { proxyMode: proxyMode.value, lanProxy: lanProxy.value, ipv6: ipv6.value, blockAds: blockAds.value, routeMode: routeMode.value }
     if (mode.value === 'node') {
-      await api('POST', '/start', {
-        ...base,
-        configMode: 'node',
-        nodeId: selectedNodeId.value,
-      })
-
+      await api('POST', '/start', { ...base, configMode: 'node', nodeId: selectedNodeId.value })
     } else if (mode.value === 'subscription') {
-      // wizard config is stored server-side in sub.wizardConfig;
-      // backend reads it via GetByID — we only need to pass subscriptionId
-      await api('POST', '/start', {
-        ...base,
-        configMode: 'subscription',
-        subscriptionId: selectedSubId.value,
-      })
-
+      await api('POST', '/start', { ...base, configMode: 'subscription', subscriptionId: selectedSubId.value })
     } else {
-      await api('POST', '/start', {
-        ...base,
-        configMode: 'upload',
-      })
+      await api('POST', '/start', { ...base, configMode: 'upload', uploadedConfigFile: uploadedConfigs.value[0]?.filename || '' })
     }
-
     await statusStore.fetch()
     logsStore.startSSE()
-  } catch (e) {
-    startError.value = e.message
-  } finally {
-    starting.value = false
-  }
+  } catch (e) { startError.value = e.message }
+  finally { starting.value = false }
 }
 
-async function doStop() {
-  await statusStore.stop()
-  logsStore.stopSSE()
-}
+async function doStop() { await statusStore.stop(); logsStore.stopSSE() }
 
-// ── Init ───────────────────────────────────────────────────────────────────────
 onMounted(async () => {
-  await Promise.all([
-    nodesStore.load(),
-    subsStore.load(),
-    loadConfigInfo(),
-  ])
-  if (nodesStore.nodes.length > 0) {
-    selectedNodeId.value = nodesStore.nodes[0].id
-  }
-  if (subsStore.subs.length > 0) {
-    selectedSubId.value = subsStore.subs[0].id
-  }
+  await Promise.all([ nodesStore.load(), subsStore.load(), loadUploadedConfigs() ])
+  if (nodesStore.nodes.length > 0) selectedNodeId.value = nodesStore.nodes[0].id
+  if (subsStore.subs.length > 0) selectedSubId.value = subsStore.subs[0].id
 })
 </script>
 
 <style scoped>
 .mode-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px;
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
 }
 .mode-btn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
@@ -542,32 +549,42 @@ onMounted(async () => {
 .mode-icon { font-size: 18px; line-height: 1; margin-bottom: 3px; }
 .mode-name { font-size: 12px; font-weight: 700; }
 .mode-desc { font-size: 10px; opacity: .7; line-height: 1.3; }
-
 .proxy-grid { grid-template-columns: 1fr 1fr; }
-
-.sub-expanded {
-  border-top: 1px solid var(--border);
-  padding: 10px 12px;
-  background: var(--bg);
-  font-size: 12px;
-}
-.sub-no-nodes {
-  display: flex; align-items: center; gap: 4px; color: var(--text3);
-}
+.sub-expanded { border-top: 1px solid var(--border); padding: 10px 12px; background: var(--bg); font-size: 12px; }
+.sub-no-nodes { display: flex; align-items: center; gap: 4px; color: var(--text3); }
 .sub-proxy-count { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
 .sub-start-hint  { color: var(--text3); font-size: 11px; }
-
 .upload-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 24px 16px;
   border: 2px dashed var(--border2); border-radius: var(--radius);
   cursor: pointer; transition: all .15s; margin-top: 6px; background: var(--bg);
 }
-.upload-drop:hover, .upload-drop.over {
-  border-color: var(--accent); background: var(--accent-bg);
-}
+.upload-drop:hover, .upload-drop.over { border-color: var(--accent); background: var(--accent-bg); }
 .upload-icon  { font-size: 28px; }
 .upload-label { font-size: 12px; color: var(--text3); text-align: center; }
-
+.config-count { font-size: 11px; color: var(--text3); }
+.config-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.config-item {
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); padding: 8px 10px;
+}
+.config-item-header { display: flex; align-items: center; justify-content: space-between; }
+.config-filename {
+  font-size: 12px; font-weight: 600; color: var(--text1);
+  font-family: var(--mono); word-break: break-all; flex: 1;
+}
+.config-actions { display: flex; gap: 4px; flex-shrink: 0; margin-left: 8px; }
+.config-meta { display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--text3); flex-wrap: wrap; }
 .action-section { flex-direction: row !important; }
+.modal-wide {
+  width: 90vw; max-width: 820px; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.json-editor {
+  width: 100%; min-height: 420px; flex: 1; resize: vertical;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  padding: 12px; background: #0f1117; color: #e2e8f0;
+  border: none; outline: none; box-sizing: border-box;
+}
 </style>
