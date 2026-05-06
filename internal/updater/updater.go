@@ -50,6 +50,42 @@ func UpdateAll(srsDir string, proxy string) []Result {
 	return results
 }
 
+// FileSpec identifies a single ruleset file to update, with an optional
+// override URL.  If URL is empty the built-in URL for the file is used.
+type FileSpec struct {
+	File string
+	URL  string
+}
+
+// UpdateFiles updates only the specified files.
+// For each entry: if URL is provided it is used directly; otherwise the
+// built-in URL for the file is looked up.  Files not found in the built-in
+// list AND without an explicit URL are reported as errors.
+func UpdateFiles(srsDir string, proxy string, files []FileSpec) []Result {
+	results := make([]Result, 0, len(files))
+	for _, spec := range files {
+		rawURL := spec.URL
+		if rawURL == "" {
+			var ok bool
+			rawURL, ok = srsFiles[spec.File]
+			if !ok {
+				results = append(results, Result{
+					File:  spec.File,
+					Error: "no download URL found for this file; please re-add it from the ruleset hub",
+				})
+				continue
+			}
+		}
+		mirror, err := downloadFile(srsDir, spec.File, rawURL, proxy)
+		r := Result{File: spec.File, Mirror: mirror}
+		if err != nil {
+			r.Error = err.Error()
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
 func downloadFile(srsDir, filename, rawURL, customProxy string) (string, error) {
 	type candidate struct {
 		label string
