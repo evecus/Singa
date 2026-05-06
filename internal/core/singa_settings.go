@@ -39,6 +39,7 @@ type InboundSettings struct {
 	TunInterface  string   `json:"tunInterface"`  // default "singa"
 	TunAddress    []string `json:"tunAddress"`    // default ["172.31.0.1/30","fdfe:dcba:9876::1/126"]
 	TunStack      string   `json:"tunStack"`      // "gvisor"|"system"|"mixed", default "mixed"
+	TunMTU        int      `json:"tunMTU"`        // default 1500
 }
 
 // ExperimentalSettings mirrors sing-box's experimental block.
@@ -71,6 +72,7 @@ func DefaultSingaSettings() SingaSettings {
 			TunInterface: "singa",
 			TunAddress:   []string{"172.31.0.1/30", "fdfe:dcba:9876::1/126"},
 			TunStack:     "mixed",
+			TunMTU:       1500,
 		},
 		Experimental: ExperimentalSettings{
 			CacheEnabled:   true,
@@ -114,6 +116,9 @@ func (ss SingaSettings) Filled() SingaSettings {
 	}
 	if ss.Inbound.TunStack == "" {
 		ss.Inbound.TunStack = d.Inbound.TunStack
+	}
+	if ss.Inbound.TunMTU == 0 {
+		ss.Inbound.TunMTU = d.Inbound.TunMTU
 	}
 	if ss.Experimental.CachePath == "" {
 		ss.Experimental.CachePath = d.Experimental.CachePath
