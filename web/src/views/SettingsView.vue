@@ -516,8 +516,8 @@ const ib = ref({
 
 const exp = ref({
   cacheEnabled: true, cachePath: 'cache.db',
-  clashAPIEnabled: false, clashAPIListen: '', clashAPIUI: 'ui',
-  clashAPIUIURL: '', clashAPIDetour: 'direct', clashAPIMode: 'rule',
+  clashAPIEnabled: true, clashAPIListen: '0.0.0.0:9090', clashAPIUI: '',
+  clashAPIUIURL: '', clashAPIDetour: '', clashAPIMode: 'rule',
 })
 
 const logCfg = ref({ disabled: true, level: 'warn' })
@@ -541,11 +541,11 @@ async function loadSingaSettings() {
     if (r.experimental) {
       exp.value.cacheEnabled    = r.experimental.cacheEnabled !== false
       exp.value.cachePath       = r.experimental.cachePath    || 'cache.db'
-      exp.value.clashAPIEnabled = !!r.experimental.clashAPIEnabled
-      exp.value.clashAPIListen  = r.experimental.clashAPIListen  || ''
-      exp.value.clashAPIUI      = r.experimental.clashAPIUI      || 'ui'
+      exp.value.clashAPIEnabled = r.experimental.clashAPIEnabled !== false
+      exp.value.clashAPIListen  = r.experimental.clashAPIListen  || '0.0.0.0:9090'
+      exp.value.clashAPIUI      = r.experimental.clashAPIUI      ?? ''
       exp.value.clashAPIUIURL   = r.experimental.clashAPIUIURL   || ''
-      exp.value.clashAPIDetour  = r.experimental.clashAPIDetour  || 'direct'
+      exp.value.clashAPIDetour  = r.experimental.clashAPIDetour  ?? ''
       exp.value.clashAPIMode    = r.experimental.clashAPIMode    || 'rule'
     }
     if (r.log) {
