@@ -558,13 +558,21 @@ func (m *Manager) Stop() {
 			log.Printf("warn: clear system proxy: %v", err)
 		}
 	}
-	cleanRunDir(m.activeRunDir)
+	// Only clean up the singa-managed run dir.
+	// If the user configured a custom SingboxWorkDir, we leave it untouched:
+	// sing-box may have written cache / log files there that should persist,
+	// and the next Start() will overwrite config.json before launching.
+	if m.activeRunDir == m.runDir {
+		cleanRunDir(m.activeRunDir)
+	}
 	m.state = StateStopped
 	m.cmd = nil
 	m.saveState(false)
 	m.stopScheduler()
 }
 
+// cleanRunDir removes all files (not subdirectories) from the singa-managed
+// run directory after sing-box stops.
 func cleanRunDir(dir string) {
 	if dir == "" {
 		return
@@ -584,6 +592,8 @@ func cleanRunDir(dir string) {
 		}
 	}
 }
+
+
 
 // ── Config preparation ─────────────────────────────────────────────────────
 
