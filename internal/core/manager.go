@@ -89,11 +89,11 @@ func (ps ProxySettings) toProxyModes() config.ProxyModes {
 	}
 	tcp := ps.TCPMode
 	if tcp == "" {
-		tcp = config.TCPModeOff
+		tcp = config.TCPModeRedir
 	}
 	udp := ps.UDPMode
 	if udp == "" {
-		udp = config.UDPModeOff
+		udp = config.UDPModeTProxy
 	}
 	return config.ProxyModes{TCP: tcp, UDP: udp}
 }
@@ -704,10 +704,10 @@ func (m *Manager) loadProxySettings() ProxySettings {
 	var ps ProxySettings
 	_ = m.proxySettingsStore.Load(&ps)
 	if ps.TCPMode == "" {
-		ps.TCPMode = config.TCPModeOff
+		ps.TCPMode = config.TCPModeRedir
 	}
 	if ps.UDPMode == "" {
-		ps.UDPMode = config.UDPModeOff
+		ps.UDPMode = config.UDPModeTProxy
 	}
 	return ps
 }
