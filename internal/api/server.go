@@ -80,6 +80,10 @@ func (s *Server) Run(addr string) error {
 		protected := a.Group("", s.authMiddleware)
 		{
 			protected.POST("/config", s.uploadConfig)
+			protected.GET("/config/list", s.listUploadedConfigs)
+			protected.DELETE("/config/:filename", s.deleteUploadedConfig)
+			protected.GET("/config/raw/:filename", s.rawUploadedConfig)
+			protected.PUT("/config/raw/:filename", s.updateUploadedConfig)
 			protected.GET("/config/info", s.configInfo)
 			protected.GET("/nodes", s.listNodes)
 			protected.POST("/nodes/import", s.importNodes)
@@ -195,13 +199,40 @@ func serveDistFile(c *gin.Context, dist fs.FS, path string) {
 
 // ── Config upload ──────────────────────────────────────────────────────────
 
+// resolveUploadFilename returns a non-conflicting filename in configsDir.
+// If name exists, tries name_1.json, name_2.json, etc.
+func resolveUploadFilename(configsDir, name string) string {
+	if !strings.HasSuffix(name, ".json") {
+		name = name + ".json"
+	}
+	dst := filepath.Join(configsDir, name)
+	if _, err := os.Stat(dst); os.IsNotExist(err) {
+		return name
+	}
+	base := strings.TrimSuffix(name, ".json")
+	for i := 1; i <= 9999; i++ {
+		candidate := fmt.Sprintf("%s_%d.json", base, i)
+		if _, err := os.Stat(filepath.Join(configsDir, candidate)); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return name
+}
+
 func (s *Server) uploadConfig(c *gin.Context) {
 	file, err := c.FormFile("config")
 	if err != nil {
 		c.JSON(400, gin.H{"error": "no config file"})
 		return
 	}
-	dst := s.manager.ConfigPath()
+	origName := filepath.Base(file.Filename)
+	if !strings.HasSuffix(origName, ".json") {
+		c.JSON(400, gin.H{"error": "only .json files are allowed"})
+		return
+	}
+	configsDir := s.manager.ConfigsDir()
+	savedName := resolveUploadFilename(configsDir, origName)
+	dst := filepath.Join(configsDir, savedName)
 	if err := c.SaveUploadedFile(file, dst); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -212,11 +243,105 @@ func (s *Server) uploadConfig(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid config.json: " + err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"ok": true, "inbounds": summarizeInbounds(cfg)})
+	c.JSON(200, gin.H{"ok": true, "filename": savedName, "inbounds": summarizeInbounds(cfg)})
+}
+
+func (s *Server) listUploadedConfigs(c *gin.Context) {
+	type entry struct {
+		Filename  string    `json:"filename"`
+		Size      int64     `json:"size"`
+		UpdatedAt time.Time `json:"updatedAt"`
+		Inbounds  []gin.H   `json:"inbounds"`
+	}
+	configsDir := s.manager.ConfigsDir()
+	entries, err := os.ReadDir(configsDir)
+	if err != nil {
+		c.JSON(200, []entry{})
+		return
+	}
+	var items []entry
+	for _, de := range entries {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		fi, err := de.Info()
+		if err != nil {
+			continue
+		}
+		var inbounds []gin.H
+		if cfg, err := config.ParseConfig(filepath.Join(configsDir, de.Name())); err == nil {
+			inbounds = summarizeInbounds(cfg)
+		}
+		items = append(items, entry{
+			Filename:  de.Name(),
+			Size:      fi.Size(),
+			UpdatedAt: fi.ModTime(),
+			Inbounds:  inbounds,
+		})
+	}
+	if items == nil {
+		items = []entry{}
+	}
+	c.JSON(200, items)
+}
+
+func (s *Server) deleteUploadedConfig(c *gin.Context) {
+	filename := c.Param("filename")
+	if filename == "" || filename[0] == '.' || strings.ContainsAny(filename, "/\\") || !strings.HasSuffix(filename, ".json") {
+		c.JSON(400, gin.H{"error": "invalid filename"})
+		return
+	}
+	path := filepath.Join(s.manager.ConfigsDir(), filename)
+	if err := os.Remove(path); err != nil {
+		c.JSON(404, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}
+
+func (s *Server) rawUploadedConfig(c *gin.Context) {
+	filename := c.Param("filename")
+	if filename == "" || filename[0] == '.' || strings.ContainsAny(filename, "/\\") || !strings.HasSuffix(filename, ".json") {
+		c.JSON(400, gin.H{"error": "invalid filename"})
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(s.manager.ConfigsDir(), filename))
+	if err != nil {
+		c.JSON(404, gin.H{"error": "config not found"})
+		return
+	}
+	c.Data(200, "application/json; charset=utf-8", data)
+}
+
+func (s *Server) updateUploadedConfig(c *gin.Context) {
+	filename := c.Param("filename")
+	if filename == "" || filename[0] == '.' || strings.ContainsAny(filename, "/\\") || !strings.HasSuffix(filename, ".json") {
+		c.JSON(400, gin.H{"error": "invalid filename"})
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "read body: " + err.Error()})
+		return
+	}
+	// Validate JSON
+	var tmp interface{}
+	if err := json.Unmarshal(body, &tmp); err != nil {
+		c.JSON(400, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	dstPath := filepath.Join(s.manager.ConfigsDir(), filename)
+	if err := os.WriteFile(dstPath, body, 0644); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
 }
 
 func (s *Server) configInfo(c *gin.Context) {
-	cfg, err := config.ParseConfig(s.manager.ConfigPath())
+	// Legacy: return info about config.json if it exists
+	path := s.manager.ConfigPath()
+	cfg, err := config.ParseConfig(path)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "no valid config.json"})
 		return
