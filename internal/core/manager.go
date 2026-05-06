@@ -18,18 +18,29 @@ import (
 
 	"github.com/singa/internal/builder"
 	"github.com/singa/internal/config"
+	"github.com/singa/internal/cronrestart"
 	"github.com/singa/internal/firewall"
 	"github.com/singa/internal/ipfilter"
 	"github.com/singa/internal/node"
+	"github.com/singa/internal/profile"
 	"github.com/singa/internal/storage"
 	"github.com/singa/internal/subscription"
-	"github.com/singa/internal/profile"
 	"github.com/singa/internal/sysproxy"
-	"github.com/singa/internal/cronrestart"
 )
 
 const singboxBin = "/usr/bin/sing-box"
 const singaGroup = "singa"
+
+// entity kind for nodes stored in the DB.
+const kindNode = "node"
+
+// setting keys stored in the settings table.
+const (
+	settingState          = "state"
+	settingIPFilter       = "ipfilter"
+	settingProxySettings  = "proxy_settings"
+	settingSingaSettings  = "singa_settings"
+)
 
 func IsReF1ndBuild() bool {
 	out, err := exec.Command(singboxBin, "version").Output()
@@ -48,41 +59,34 @@ const (
 )
 
 // StartParams bundles all start-time options.
-// ProxyMode/LanProxy/IPv6 are intentionally removed: they are always loaded
-// from the persistent ProxySettings store and must not be passed by callers.
 type StartParams struct {
 	BlockAds       bool              `json:"blockAds"`
 	RouteMode      builder.RouteMode `json:"routeMode"`
 	NodeID         string            `json:"nodeId"`
 	ConfigMode     string            `json:"configMode"` // "upload" | "node" | "subnode" | "subscription" | "profile"
 	SubscriptionID string            `json:"subscriptionId"`
-	SubNodeIdx     int               `json:"subNodeIdx"` // used by "subnode" mode
+	SubNodeIdx     int               `json:"subNodeIdx"`
 	ProfileID      string            `json:"profileId"`
 	ClashAPIPort   int               `json:"clashApiPort"`
 	ClashAPISecret string            `json:"clashApiSecret"`
 }
 
-// savedState is persisted to data/state.json to survive restarts.
+// savedState is persisted to the DB settings table to survive restarts.
 type savedState struct {
 	Params  StartParams `json:"params"`
 	Running bool        `json:"running"`
 }
 
-// ProxySettings holds the globally-persistent proxy mode configuration
-// saved from the Settings page. Influences nft rules, routing, and inbounds
-// for every config mode (node / subscription / upload).
+// ProxySettings holds globally-persistent proxy mode configuration.
 type ProxySettings struct {
-	SystemProxy bool           `json:"systemProxy"` // true = inject mixed-in + set OS proxy
-	TCPMode     config.TCPMode `json:"tcpMode"`     // only used when SystemProxy=false
-	UDPMode     config.UDPMode `json:"udpMode"`     // only used when SystemProxy=false
+	SystemProxy bool           `json:"systemProxy"`
+	TCPMode     config.TCPMode `json:"tcpMode"`
+	UDPMode     config.UDPMode `json:"udpMode"`
 	LanProxy    bool           `json:"lanProxy"`
 	IPv6        bool           `json:"ipv6"`
 	BypassCN    bool           `json:"bypassCN"`
 }
 
-// toProxyModes converts ProxySettings to the config.ProxyModes struct used
-// by the builder and firewall packages.
-// When SystemProxy is enabled, transparent proxy modes are forced off.
 func (ps ProxySettings) toProxyModes() config.ProxyModes {
 	if ps.SystemProxy {
 		return config.ProxyModes{TCP: config.TCPModeOff, UDP: config.UDPModeOff}
@@ -98,8 +102,6 @@ func (ps ProxySettings) toProxyModes() config.ProxyModes {
 	return config.ProxyModes{TCP: tcp, UDP: udp}
 }
 
-// wantsSystemProxy returns true when mixed-in should be injected and the OS
-// system proxy should be set to point at it.
 func (ps ProxySettings) wantsSystemProxy() bool {
 	return ps.SystemProxy
 }
@@ -118,50 +120,54 @@ type Manager struct {
 	params StartParams
 	ports  builder.Ports
 
-	// resolved at Start time, kept for Stop / Status
 	activeProxySettings ProxySettings
-	activeRunDir        string // effective sing-box -D workdir, set at Start
+	activeRunDir        string
 
-	nodeStore          *storage.Store
-	stateStore         *storage.Store
-	ipfilterStore      *storage.Store
-	proxySettingsStore *storage.Store
-	singaSettingsStore *storage.Store
-	nodes              []*node.Node
-	subManager         *subscription.Manager
-	profileManager     *profile.Manager
+	db             *storage.DB
+	stateStore     *storage.Store
+	ipfilterStore  *storage.Store
+	proxyStore     *storage.Store
+	singaStore     *storage.Store
+	subManager     *subscription.Manager
+	profileManager *profile.Manager
 
 	logMu   sync.RWMutex
 	logBuf  []string
 	logSubs []chan string
 
-	// scheduler
 	schedStop chan struct{}
 }
 
+// NewManager opens the SQLite database and initialises all sub-managers.
 func NewManager(dataDir, runDir, srsDir string) *Manager {
 	configsDir := filepath.Join(dataDir, "configs")
-	nodesDir := filepath.Join(dataDir, "nodes")
-	profilesDir := filepath.Join(dataDir, "profiles")
-	for _, d := range []string{nodesDir, profilesDir} {
+	for _, d := range []string{configsDir} {
 		_ = os.MkdirAll(d, 0755)
 	}
-	m := &Manager{
-		dataDir:            dataDir,
-		runDir:             runDir,
-		srsDir:             srsDir,
-		configsDir:         configsDir,
-		state:              StateStopped,
-		logBuf:             make([]string, 0, 500),
-		nodeStore:          storage.New(nodesDir, "nodes.json"),
-		stateStore:         storage.New(dataDir, "state.json"),
-		ipfilterStore:      storage.New(dataDir, "ipfilter.json"),
-		proxySettingsStore: storage.New(dataDir, "proxy_settings.json"),
-		singaSettingsStore: storage.New(dataDir, "singa_settings.json"),
-		subManager:         subscription.NewManager(nodesDir),
-		profileManager:     profile.NewManager(profilesDir),
+
+	dbPath := filepath.Join(dataDir, "singa.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		log.Fatalf("singa: open database: %v", err)
 	}
-	m.loadNodes()
+
+	m := &Manager{
+		dataDir:        dataDir,
+		runDir:         runDir,
+		srsDir:         srsDir,
+		configsDir:     configsDir,
+		state:          StateStopped,
+		logBuf:         make([]string, 0, 500),
+		db:             db,
+		stateStore:     storage.NewStore(db, settingState),
+		ipfilterStore:  storage.NewStore(db, settingIPFilter),
+		proxyStore:     storage.NewStore(db, settingProxySettings),
+		singaStore:     storage.NewStore(db, settingSingaSettings),
+		subManager:     subscription.NewManager(db),
+		profileManager: profile.NewManager(db),
+	}
+
+	// Restore last StartParams (not Running — that's handled by AutoStart).
 	var ss savedState
 	if err := m.stateStore.Load(&ss); err == nil {
 		m.params = ss.Params
@@ -192,37 +198,63 @@ func (m *Manager) saveState(running bool) {
 
 // ── Node management ────────────────────────────────────────────────────────
 
-func (m *Manager) loadNodes() {
-	m.nodeStore.Load(&m.nodes)
-	if m.nodes == nil {
-		m.nodes = []*node.Node{}
+// loadNodesFromDB reads all nodes from the entities table and returns them
+// ordered by insertion time.
+func (m *Manager) loadNodesFromDB() []*node.Node {
+	entities, err := m.db.ListEntities(kindNode)
+	if err != nil {
+		log.Printf("warn: load nodes: %v", err)
+		return []*node.Node{}
 	}
+	out := make([]*node.Node, 0, len(entities))
+	for _, e := range entities {
+		var n node.Node
+		if err := json.Unmarshal([]byte(e.Data), &n); err != nil {
+			log.Printf("warn: unmarshal node %s: %v", e.ID, err)
+			continue
+		}
+		out = append(out, &n)
+	}
+	return out
 }
 
 func (m *Manager) GetNodes() []*node.Node {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.nodes
+	return m.loadNodesFromDB()
 }
 
 func (m *Manager) AddNodes(ns []*node.Node) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.nodes = append(m.nodes, ns...)
-	m.nodeStore.Save(m.nodes)
+	for _, n := range ns {
+		if err := m.db.UpsertEntity(kindNode, n.ID, n); err != nil {
+			log.Printf("warn: add node %s: %v", n.ID, err)
+		}
+	}
 }
 
 func (m *Manager) DeleteNode(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for i, n := range m.nodes {
-		if n.ID == id {
-			m.nodes = append(m.nodes[:i], m.nodes[i+1:]...)
-			m.nodeStore.Save(m.nodes)
-			return true
-		}
+	e, err := m.db.GetEntity(kindNode, id)
+	if err != nil || e == nil {
+		return false
 	}
-	return false
+	_ = m.db.DeleteEntity(kindNode, id)
+	return true
+}
+
+func (m *Manager) findNode(id string) *node.Node {
+	e, err := m.db.GetEntity(kindNode, id)
+	if err != nil || e == nil {
+		return nil
+	}
+	var n node.Node
+	if err := json.Unmarshal([]byte(e.Data), &n); err != nil {
+		return nil
+	}
+	return &n
 }
 
 // ── Group helpers ──────────────────────────────────────────────────────────
@@ -306,14 +338,9 @@ func (m *Manager) Start(p StartParams) error {
 	ports := builder.DefaultPorts()
 	m.ports = ports
 
-	// Always load proxy settings from persistent store.
-	// This guarantees that every config mode (node/subscription/upload)
-	// uses the exact TCP/UDP modes the user configured in Settings.
 	ps := m.loadProxySettings()
 	modes := ps.toProxyModes()
 
-	// Load singa settings (inbound ports, experimental, log).
-	// These override DefaultPorts so the user-configured ports are used.
 	ss := m.loadSingaSettings()
 	ports.DNS = ss.Inbound.DNSPort
 	ports.TProxy = ss.Inbound.TProxyPort
@@ -330,8 +357,6 @@ func (m *Manager) Start(p StartParams) error {
 		if err != nil {
 			return fmt.Errorf("parse config: %w", err)
 		}
-		// For upload config, detect existing inbound ports from the JSON.
-		// We scan for tproxy and redirect inbounds independently.
 		if modes.NeedsTProxyInbound() {
 			if port, err := config.DetectPort(cfg, config.ModeTProxy); err == nil && port > 0 {
 				ports.TProxy = port
@@ -397,8 +422,6 @@ func (m *Manager) Start(p StartParams) error {
 		return fmt.Errorf("unknown config mode %q", p.ConfigMode)
 	}
 
-	// Patch the run-time config: inject managed inbounds, experimental, log.
-	// This runs for every config mode so the settings always take effect.
 	if err := patchConfig(m.RunConfigPath(), modes, ss, ps.LanProxy, ps.SystemProxy); err != nil {
 		return fmt.Errorf("patch config: %w", err)
 	}
@@ -420,15 +443,12 @@ func (m *Manager) Start(p StartParams) error {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
-	// Determine working directory for sing-box
 	effectiveRunDir := m.runDir
 	if ss.SingboxWorkDir != "" {
 		effectiveRunDir = ss.SingboxWorkDir
 		if err := os.MkdirAll(effectiveRunDir, 0755); err != nil {
 			return fmt.Errorf("create workdir: %w", err)
 		}
-		// Copy the prepared config.json into the custom workdir,
-		// because sing-box reads config.json from the -D directory.
 		destConfig := filepath.Join(effectiveRunDir, "config.json")
 		if err := copyFile(m.RunConfigPath(), destConfig); err != nil {
 			return fmt.Errorf("copy config to workdir: %w", err)
@@ -454,8 +474,6 @@ func (m *Manager) Start(p StartParams) error {
 		return fmt.Errorf("start sing-box: %w", err)
 	}
 
-	// Re-apply TUN ip routes after sing-box creates the TUN device.
-	// setupRoutes() runs before sing-box starts, so the device may not exist yet.
 	if modes.NeedsTunInbound() {
 		go func() {
 			dev := ss.Inbound.TunInterface
@@ -480,10 +498,8 @@ func (m *Manager) Start(p StartParams) error {
 	m.activeProxySettings = ps
 	m.saveState(true)
 
-	// Start scheduled restart
 	m.startScheduler()
 
-	// System proxy: only when both TCP and UDP are "off" (no transparent proxy).
 	if ps.wantsSystemProxy() {
 		if err := sysproxy.Set(ports.Mixed); err != nil {
 			m.appendLog("warn: set system proxy: " + err.Error())
@@ -549,8 +565,6 @@ func (m *Manager) Stop() {
 	m.stopScheduler()
 }
 
-// cleanRunDir removes all files (not directories) inside dir.
-// Called after sing-box stops to clear generated configs, cache, etc.
 func cleanRunDir(dir string) {
 	if dir == "" {
 		return
@@ -590,8 +604,6 @@ func (m *Manager) prepareProfileConfig(p StartParams, ports builder.Ports) error
 		return fmt.Errorf("profile %q has no wizard config — complete the wizard first", p.ProfileID)
 	}
 
-	// Scan WizardConfig outbounds for subscription references and collect
-	// proxy nodes from every referenced subscription (deduped by tag).
 	proxies, err := m.collectProxiesFromWizard(prof.WizardConfig)
 	if err != nil {
 		return fmt.Errorf("subscription cache: %w", err)
@@ -604,10 +616,6 @@ func (m *Manager) prepareProfileConfig(p StartParams, ports builder.Ports) error
 	return os.WriteFile(m.RunConfigPath(), data, 0644)
 }
 
-// collectProxiesFromWizard parses the wizard JSON, finds every outbound ref
-// whose type is "Subscription"/"Subscribe", and returns a SubProxies map:
-// subscription ID → ordered list of proxy nodes for that subscription.
-// Each subscription is fetched only once even if referenced by multiple outbounds.
 func (m *Manager) collectProxiesFromWizard(raw []byte) (builder.SubProxies, error) {
 	var wc struct {
 		Outbounds []struct {
@@ -621,7 +629,7 @@ func (m *Manager) collectProxiesFromWizard(raw []byte) (builder.SubProxies, erro
 		return nil, fmt.Errorf("parse wizard config: %w", err)
 	}
 
-	seen := map[string]bool{} // dedupe subscription IDs already fetched
+	seen := map[string]bool{}
 	result := builder.SubProxies{}
 
 	for _, ob := range wc.Outbounds {
@@ -652,7 +660,6 @@ func (m *Manager) prepareSubscriptionConfig(p StartParams, modes config.ProxyMod
 	if err != nil {
 		return fmt.Errorf("subscription cache: %w", err)
 	}
-	// For a standalone subscription config, wrap nodes under the subscription ID
 	subProxies := builder.SubProxies{p.SubscriptionID: nodes}
 	data, err := builder.BuildConfigFromWizard(sub.WizardConfig, subProxies)
 	if err != nil {
@@ -676,15 +683,6 @@ func (m *Manager) prepareNodeConfig(p StartParams, modes config.ProxyModes, lanP
 	return os.WriteFile(m.RunConfigPath(), data, 0644)
 }
 
-func (m *Manager) findNode(id string) *node.Node {
-	for _, n := range m.nodes {
-		if n.ID == id {
-			return n
-		}
-	}
-	return nil
-}
-
 // ── Settings persistence ───────────────────────────────────────────────────
 
 func (m *Manager) GetIPFilter() ipfilter.Config {
@@ -702,7 +700,7 @@ func (m *Manager) SaveIPFilter(cfg ipfilter.Config) error {
 
 func (m *Manager) loadProxySettings() ProxySettings {
 	var ps ProxySettings
-	_ = m.proxySettingsStore.Load(&ps)
+	_ = m.proxyStore.Load(&ps)
 	if ps.TCPMode == "" {
 		ps.TCPMode = config.TCPModeRedir
 	}
@@ -717,12 +715,12 @@ func (m *Manager) GetProxySettings() ProxySettings {
 }
 
 func (m *Manager) SaveProxySettings(ps ProxySettings) error {
-	return m.proxySettingsStore.Save(&ps)
+	return m.proxyStore.Save(&ps)
 }
 
 func (m *Manager) loadSingaSettings() SingaSettings {
 	var ss SingaSettings
-	_ = m.singaSettingsStore.Load(&ss)
+	_ = m.singaStore.Load(&ss)
 	return ss.Filled()
 }
 
@@ -731,7 +729,7 @@ func (m *Manager) GetSingaSettings() SingaSettings {
 }
 
 func (m *Manager) SaveSingaSettings(ss SingaSettings) error {
-	return m.singaSettingsStore.Save(&ss)
+	return m.singaStore.Save(&ss)
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────
@@ -833,11 +831,10 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-
 // ── Scheduler ──────────────────────────────────────────────────────────────
 
 func (m *Manager) startScheduler() {
-	m.stopScheduler() // stop any previous
+	m.stopScheduler()
 	ss := m.loadSingaSettings()
 	if !ss.ScheduledRestart.Enabled || ss.ScheduledRestart.Cron == "" {
 		return
@@ -885,7 +882,7 @@ func (m *Manager) stopScheduler() {
 	}
 }
 
-// RestartSchedulerIfNeeded restarts the scheduler (called after settings change).
+// RestartSchedulerIfNeeded restarts the scheduler after settings change.
 func (m *Manager) RestartSchedulerIfNeeded() {
 	m.mu.Lock()
 	running := m.state == StateRunning
@@ -905,7 +902,7 @@ func (m *Manager) RecoverState() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd == nil {
-		log.Printf("singa: stale running=true in state.json, correcting to stopped")
+		log.Printf("singa: stale running=true in state, correcting to stopped")
 		ss.Running = false
 		if err := m.stateStore.Save(&ss); err != nil {
 			log.Printf("singa: recover state: %v", err)

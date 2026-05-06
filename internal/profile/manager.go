@@ -3,59 +3,74 @@ package profile
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/singa/internal/storage"
 )
 
+const kindProfile = "profile"
+
+// Manager stores profiles in the SQLite entities table.
 type Manager struct {
-	mu      sync.Mutex
-	dataDir string
-	list    []*Profile
+	mu sync.Mutex
+	db *storage.DB
 }
 
-func NewManager(dataDir string) *Manager {
-	m := &Manager{dataDir: dataDir}
-	m.load()
-	return m
+// NewManager creates a Manager backed by the shared DB.
+func NewManager(db *storage.DB) *Manager {
+	return &Manager{db: db}
 }
 
-func (m *Manager) metaPath() string { return filepath.Join(m.dataDir, "profiles.json") }
+// ── internal helpers ────────────────────────────────────────────────────────
 
-func (m *Manager) load() {
-	data, err := os.ReadFile(m.metaPath())
+func (m *Manager) findProfile(id string) (*Profile, error) {
+	e, err := m.db.GetEntity(kindProfile, id)
 	if err != nil {
-		m.list = []*Profile{}
-		return
+		return nil, err
 	}
-	_ = json.Unmarshal(data, &m.list)
-	if m.list == nil {
-		m.list = []*Profile{}
+	if e == nil {
+		return nil, nil
 	}
+	var p Profile
+	if err := json.Unmarshal([]byte(e.Data), &p); err != nil {
+		return nil, fmt.Errorf("unmarshal profile %s: %w", id, err)
+	}
+	return &p, nil
 }
 
-func (m *Manager) save() error {
-	data, err := json.MarshalIndent(m.list, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(m.metaPath(), data, 0644)
+func (m *Manager) saveProfile(p *Profile) error {
+	return m.db.UpsertEntity(kindProfile, p.ID, p)
 }
 
+// ── Public API ──────────────────────────────────────────────────────────────
+
+// List returns all profiles ordered by creation time (oldest first).
 func (m *Manager) List() []*Profile {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]*Profile, len(m.list))
-	copy(out, m.list)
+
+	entities, err := m.db.ListEntities(kindProfile)
+	if err != nil {
+		return []*Profile{}
+	}
+	out := make([]*Profile, 0, len(entities))
+	for _, e := range entities {
+		var p Profile
+		if err := json.Unmarshal([]byte(e.Data), &p); err != nil {
+			continue
+		}
+		out = append(out, &p)
+	}
 	return out
 }
 
+// Add creates a new profile.
 func (m *Manager) Add(name, subscriptionID string, wizardConfig json.RawMessage) (*Profile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	p := &Profile{
 		ID:             uuid.New().String(),
 		Name:           name,
@@ -63,18 +78,21 @@ func (m *Manager) Add(name, subscriptionID string, wizardConfig json.RawMessage)
 		UpdatedAt:      time.Now(),
 		WizardConfig:   wizardConfig,
 	}
-	m.list = append(m.list, p)
-	if err := m.save(); err != nil {
-		m.list = m.list[:len(m.list)-1]
+	if err := m.saveProfile(p); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
 
+// Update replaces name, subscriptionID, and wizardConfig for an existing profile.
 func (m *Manager) Update(id, name, subscriptionID string, wizardConfig json.RawMessage) (*Profile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	p := m.find(id)
+
+	p, err := m.findProfile(id)
+	if err != nil {
+		return nil, err
+	}
 	if p == nil {
 		return nil, fmt.Errorf("profile %q not found", id)
 	}
@@ -84,32 +102,32 @@ func (m *Manager) Update(id, name, subscriptionID string, wizardConfig json.RawM
 	if wizardConfig != nil {
 		p.WizardConfig = wizardConfig
 	}
-	return p, m.save()
+	if err := m.saveProfile(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
+// Delete removes a profile.
 func (m *Manager) Delete(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for i, p := range m.list {
-		if p.ID == id {
-			m.list = append(m.list[:i], m.list[i+1:]...)
-			return m.save()
-		}
+
+	p, err := m.findProfile(id)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("profile %q not found", id)
+	if p == nil {
+		return fmt.Errorf("profile %q not found", id)
+	}
+	return m.db.DeleteEntity(kindProfile, id)
 }
 
+// GetByID returns a single profile.
 func (m *Manager) GetByID(id string) *Profile {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.find(id)
-}
 
-func (m *Manager) find(id string) *Profile {
-	for _, p := range m.list {
-		if p.ID == id {
-			return p
-		}
-	}
-	return nil
+	p, _ := m.findProfile(id)
+	return p
 }

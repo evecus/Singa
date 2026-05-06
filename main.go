@@ -55,21 +55,19 @@ func main() {
 	runDir := filepath.Join(dataDir, "run")
 	srsDir := filepath.Join(dataDir, "srs")
 	configsDir := filepath.Join(dataDir, "configs")
-	nodesDir := filepath.Join(dataDir, "nodes")
-	profilesDir := filepath.Join(dataDir, "profiles")
 
-	for _, d := range []string{dataDir, runDir, srsDir, configsDir, nodesDir, profilesDir} {
+	for _, d := range []string{dataDir, runDir, srsDir, configsDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			log.Fatalf("mkdir %s: %v", d, err)
 		}
 	}
 
-	// Extract embedded .srs files to data/srs/ (skips if already present)
+	// Extract embedded .srs files to data/srs/ (skips if already present).
 	if err := extractSRS(srsFS, srsDir); err != nil {
 		log.Printf("warn: extract srs: %v", err)
 	}
 
-	// Extract cn-bypass.nft to dataDir (skips if already present)
+	// Extract cn-bypass.nft to dataDir (skips if already present).
 	cnNftDst := filepath.Join(dataDir, "cn-bypass.nft")
 	if _, statErr := os.Stat(cnNftDst); os.IsNotExist(statErr) {
 		if err := os.WriteFile(cnNftDst, cnBypassNft, 0644); err != nil {
@@ -79,6 +77,7 @@ func main() {
 		}
 	}
 
+	// NewManager opens data/singa.db and initialises the schema.
 	manager := core.NewManager(dataDir, runDir, srsDir)
 
 	sigCh := make(chan os.Signal, 1)
