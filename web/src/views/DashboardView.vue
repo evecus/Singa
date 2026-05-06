@@ -46,7 +46,8 @@
         <div style="display:flex;flex-direction:column;gap:14px">
 
           <!-- Config selector -->
-          <div class="card">
+          <div class="card" style="position:relative">
+            <div v-if="isRunning" class="card-disabled-overlay"></div>
             <div class="card-title">选择配置</div>
             <div class="field" style="margin-bottom:10px">
               <label class="field-label">配置模式</label>
@@ -86,7 +87,8 @@
           </div>
 
           <!-- Route mode + blockAds: single-node only -->
-          <div v-if="params.configMode === 'node'" class="card">
+          <div v-if="params.configMode === 'node'" class="card" style="position:relative">
+            <div v-if="isRunning" class="card-disabled-overlay"></div>
             <div class="card-title">路由模式</div>
             <div class="field" style="margin-bottom:10px">
               <div class="seg">
@@ -116,28 +118,7 @@
         <!-- Right: Status info + log -->
         <div style="display:flex;flex-direction:column;gap:14px">
 
-          <!-- Runtime info -->
-          <div class="card" v-if="isRunning">
-            <div class="card-title">运行信息</div>
-            <div class="info-table">
-              <span class="info-k">代理模式</span>
-              <span class="info-v">{{ status.proxyMode || '—' }}</span>
-              <span class="info-k">路由模式</span>
-              <span class="info-v">{{ status.routeMode || '—' }}</span>
-              <template v-if="status.ports?.mixed">
-                <span class="info-k">HTTP/SOCKS5</span>
-                <span class="info-v">127.0.0.1:{{ status.ports.mixed }}</span>
-              </template>
-              <template v-if="status.ports?.tproxy">
-                <span class="info-k">TProxy</span>
-                <span class="info-v">:{{ status.ports.tproxy }}</span>
-              </template>
-              <template v-if="status.ports?.dns">
-                <span class="info-k">DNS</span>
-                <span class="info-v">:{{ status.ports.dns }}</span>
-              </template>
-            </div>
-          </div>
+          <!-- Runtime info hidden per user request -->
 
           <!-- Mini log -->
           <div class="card" style="padding:0;overflow:hidden">
@@ -454,18 +435,15 @@ watch(() => logsStore.logs.length, () => {
   nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
 })
 
-// Clock & memory
-async function readMem() {
-  if (!status.value.pid) { memStr.value = '—'; return }
-  try {
-    const r = await fetch(`/proc/${status.value.pid}/status`)
-    const t = await r.text()
-    const m = /VmRSS:\s+(\d+)/.exec(t)
-    if (m) memStr.value = (parseInt(m[1]) / 1024).toFixed(1) + ' MB'
-  } catch {
-    // /proc not directly accessible via fetch; use status endpoint workaround
-    memStr.value = isRunning.value ? '运行中' : '—'
+// Memory: computed from status.rssKB returned by backend
+function updateMem() {
+  const kb = status.value.rssKB
+  if (!kb || kb === 0) {
+    memStr.value = isRunning.value ? '—' : '—'
+    return
   }
+  if (kb < 1024) memStr.value = kb + ' KB'
+  else memStr.value = (kb / 1024).toFixed(1) + ' MB'
 }
 
 let clockTimer = null
@@ -505,8 +483,10 @@ onMounted(async () => {
   }
   clockTimer = setInterval(() => {
     now.value = new Date().toLocaleTimeString('zh-CN')
-  }, 1000)
+    updateMem()
+  }, 2000)
   now.value = new Date().toLocaleTimeString('zh-CN')
+  updateMem()
 })
 onUnmounted(() => clearInterval(clockTimer))
 </script>
@@ -546,4 +526,12 @@ onUnmounted(() => clearInterval(clockTimer))
   .np-grid { grid-template-columns: 1fr; }
 }
 
+.card-disabled-overlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border-radius: inherit;
+  z-index: 10;
+  cursor: not-allowed;
+}
 </style>
