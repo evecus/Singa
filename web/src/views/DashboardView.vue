@@ -40,57 +40,55 @@
       </div>
 
       <!-- ── Control + Info ────────────────────────────────────────── -->
-      <div class="grid-2" style="align-items:start">
+      <div class="grid-2" style="align-items:stretch">
 
-        <!-- Left: Control panel -->
-        <div style="display:flex;flex-direction:column;gap:14px">
+        <!-- Left: Config selector card -->
+        <div class="card" style="position:relative;display:flex;flex-direction:column">
+          <div v-if="isRunning" class="card-disabled-overlay"></div>
+          <div class="card-title">选择配置</div>
 
-          <!-- Config selector -->
-          <div class="card" style="position:relative">
-            <div v-if="isRunning" class="card-disabled-overlay"></div>
-            <div class="card-title">选择配置</div>
-            <div class="field" style="margin-bottom:10px">
-              <label class="field-label">配置模式</label>
-              <div class="mode-grid">
-                <div class="mode-card" :class="{ on: params.configMode === 'node' }"
-                  @click="params.configMode = 'node'">
-                  <div class="mode-card-icon">🔗</div>
-                  <div class="mode-card-name">单节点</div>
-                  <div class="mode-card-desc">从节点列表选择</div>
-                </div>
-                <div class="mode-card" :class="{ on: params.configMode === 'profile' || params.configMode === 'upload' }"
-                  @click="params.configMode = 'profile'">
-                  <div class="mode-card-icon">📄</div>
-                  <div class="mode-card-name">配置文件</div>
-                  <div class="mode-card-desc">生成或上传的配置</div>
-                </div>
+          <!-- 配置模式 -->
+          <div class="field" style="margin-bottom:10px">
+            <label class="field-label">配置模式</label>
+            <div class="mode-grid">
+              <div class="mode-card" :class="{ on: params.configMode === 'node' }"
+                @click="params.configMode = 'node'">
+                <div class="mode-card-icon">🔗</div>
+                <div class="mode-card-name">单节点</div>
+                <div class="mode-card-desc">从节点列表选择</div>
               </div>
-            </div>
-
-            <!-- Node selector -->
-            <div v-if="params.configMode === 'node'" class="field" style="margin-bottom:10px">
-              <label class="field-label">选择节点</label>
-              <button class="select" style="text-align:left;cursor:pointer" @click="showNodePicker=true">
-                <template v-if="selectedNodeLabel">{{ selectedNodeLabel }}</template>
-                <span v-else style="color:var(--text3)">— 点击选择节点 —</span>
-              </button>
-            </div>
-
-            <!-- Profile / upload selector -->
-            <div v-if="params.configMode === 'profile' || params.configMode === 'upload'" class="field" style="margin-bottom:10px">
-              <label class="field-label">选择配置文件</label>
-              <button class="select" style="text-align:left;cursor:pointer" @click="showProfilePicker=true">
-                <template v-if="selectedProfileLabel">{{ selectedProfileLabel }}</template>
-                <span v-else style="color:var(--text3)">— 点击选择配置 —</span>
-              </button>
+              <div class="mode-card" :class="{ on: params.configMode === 'profile' || params.configMode === 'upload' }"
+                @click="params.configMode = 'profile'">
+                <div class="mode-card-icon">📄</div>
+                <div class="mode-card-name">配置文件</div>
+                <div class="mode-card-desc">生成或上传的配置</div>
+              </div>
             </div>
           </div>
 
-          <!-- Route mode + blockAds: single-node only -->
-          <div v-if="params.configMode === 'node'" class="card" style="position:relative">
-            <div v-if="isRunning" class="card-disabled-overlay"></div>
-            <div class="card-title">路由模式</div>
+          <!-- Node selector -->
+          <div v-if="params.configMode === 'node'" class="field" style="margin-bottom:10px">
+            <label class="field-label">选择节点</label>
+            <button class="select" style="text-align:left;cursor:pointer" @click="showNodePicker=true">
+              <template v-if="selectedNodeLabel">{{ selectedNodeLabel }}</template>
+              <span v-else style="color:var(--text3)">— 点击选择节点 —</span>
+            </button>
+          </div>
+
+          <!-- Profile / upload selector -->
+          <div v-if="params.configMode === 'profile' || params.configMode === 'upload'" class="field" style="margin-bottom:10px">
+            <label class="field-label">选择配置文件</label>
+            <button class="select" style="text-align:left;cursor:pointer" @click="showProfilePicker=true">
+              <template v-if="selectedProfileLabel">{{ selectedProfileLabel }}</template>
+              <span v-else style="color:var(--text3)">— 点击选择配置 —</span>
+            </button>
+          </div>
+
+          <!-- 路由模式 + 广告拦截（单节点模式才显示）-->
+          <template v-if="params.configMode === 'node'">
+            <div class="field-divider"></div>
             <div class="field" style="margin-bottom:10px">
+              <label class="field-label">路由模式</label>
               <div class="seg">
                 <button class="seg-btn" :class="{ on: params.routeMode === 'whitelist' }"
                   @click="params.routeMode = 'whitelist'">🇨🇳 大陆白名单</button>
@@ -100,46 +98,40 @@
                   @click="params.routeMode = 'global'">🌍 全局</button>
               </div>
             </div>
-            <label class="flex items-center gap-2" style="cursor:pointer;font-size:13px">
+            <label class="flex items-center gap-2" style="cursor:pointer;font-size:13px;margin-bottom:10px">
               <div class="toggle" :class="{ on: params.blockAds }"
                 @click="params.blockAds = !params.blockAds"></div>
               <span>广告拦截</span>
             </label>
-            <div class="field-hint" style="margin-top:10px">
+            <div class="field-hint">
               代理模式、局域网代理、IPv6 在
               <router-link to="/settings" style="color:var(--accent)">设置</router-link>
               中配置，当前：<strong>{{ currentProxyModeLabel }}</strong>
             </div>
-          </div>
+          </template>
 
-          <div v-if="startErr" class="alert alert-error">{{ startErr }}</div>
+          <div v-if="startErr" class="alert alert-error" style="margin-top:10px">{{ startErr }}</div>
         </div>
 
-        <!-- Right: Status info + log -->
-        <div style="display:flex;flex-direction:column;gap:14px">
-
-          <!-- Runtime info hidden per user request -->
-
-          <!-- Mini log -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div class="card-title-row" style="padding:12px 14px 0">
-              <span class="card-title" style="margin:0">实时日志</span>
-              <button class="btn btn-ghost btn-sm" @click="logsStore.clear()">清空</button>
+        <!-- Right: Log card，flex 撑满与左侧等高 -->
+        <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+          <div class="card-title-row" style="padding:12px 14px 0;flex-shrink:0">
+            <span class="card-title" style="margin:0">实时日志</span>
+            <button class="btn btn-ghost btn-sm" @click="logsStore.clear()">清空</button>
+          </div>
+          <div class="log-panel" style="flex:1;min-height:200px;border-radius:0;box-shadow:none;background:#0f1117">
+            <div class="log-toolbar">
+              <div v-if="isRunning" class="log-dot"></div>
+              <span class="log-label">{{ isRunning ? 'LIVE' : 'IDLE' }}</span>
             </div>
-            <div class="log-panel" style="height:220px;border-radius:0;box-shadow:none;background:#0f1117">
-              <div class="log-toolbar">
-                <div v-if="isRunning" class="log-dot"></div>
-                <span class="log-label">{{ isRunning ? 'LIVE' : 'IDLE' }}</span>
-              </div>
-              <div class="log-body" ref="logEl">
-                <span v-if="!logsStore.logs.length" class="log-empty">等待日志…</span>
-                <span v-for="(l, i) in logsStore.logs.slice(-80)" :key="i"
-                  class="log-line" :class="logCls(l)">{{ l }}<br></span>
-              </div>
+            <div class="log-body" ref="logEl">
+              <span v-if="!logsStore.logs.length" class="log-empty">等待日志…</span>
+              <span v-for="(l, i) in logsStore.logs.slice(-80)" :key="i"
+                class="log-line" :class="logCls(l)">{{ l }}<br></span>
             </div>
           </div>
-
         </div>
+
       </div>
 
     </div>
@@ -533,5 +525,10 @@ onUnmounted(() => clearInterval(clockTimer))
   border-radius: inherit;
   z-index: 10;
   cursor: not-allowed;
+}
+.field-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0 12px;
 }
 </style>
