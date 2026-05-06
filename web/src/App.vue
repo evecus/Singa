@@ -21,7 +21,6 @@
         </RouterLink>
         <RouterLink to="/nodes" class="nav-item" active-class="active" @click="sidebarOpen = false">
           <span class="nav-icon">⬢</span><span>节点与订阅</span>
-          <span v-if="totalNodes" class="nav-badge">{{ totalNodes }}</span>
         </RouterLink>
         <RouterLink to="/profiles" class="nav-item" active-class="active" @click="sidebarOpen = false">
           <span class="nav-icon">◈</span><span>配置文件</span>
