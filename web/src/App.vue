@@ -110,7 +110,7 @@ onMounted(async () => {
   await statusStore.fetch()
   await Promise.all([nodesStore.load(), subsStore.load()])
   if (statusStore.isRunning) logsStore.startSSE()
-  poll = setInterval(statusStore.fetch, 8000)
+  poll = setInterval(statusStore.fetch, 60000)
 })
 onUnmounted(() => { clearInterval(poll); logsStore.stopSSE() })
 </script>
