@@ -195,17 +195,27 @@
           </div>
 
           <!-- 上传配置 -->
-          <div class="np-group-title" style="margin-top:14px">上传配置</div>
-          <button class="profile-pick-item" :class="{ on: params.configMode === 'upload' }"
-            @click="pickUpload">
-            <span style="font-size:16px">📁</span>
-            <div style="flex:1;text-align:left">
-              <div style="font-weight:600;font-size:13px">已上传的 JSON 配置</div>
-              <div style="font-size:11px;color:var(--text3)">使用上传配置文件页面上传的 config.json</div>
-            </div>
-            <span v-if="params.configMode === 'upload'"
-              style="color:var(--accent);font-size:14px">✓</span>
-          </button>
+          <div class="np-group-title" style="margin-top:14px">上传配置（{{ uploadedConfigs.length }}）</div>
+          <div v-if="!uploadedConfigs.length" class="empty" style="padding:8px 0;font-size:12px;color:var(--text3)">
+            暂无上传配置，前往<router-link to="/config" style="color:var(--accent)">配置文件</router-link>页上传
+          </div>
+          <div v-else style="display:flex;flex-direction:column;gap:6px">
+            <button v-for="uc in uploadedConfigs" :key="uc.filename"
+              class="profile-pick-item"
+              :class="{ on: params.configMode === 'upload' && params.uploadedConfigFile === uc.filename }"
+              @click="pickUploadedConfig(uc)">
+              <span style="font-size:16px">📁</span>
+              <div style="flex:1;text-align:left">
+                <div style="font-weight:600;font-size:13px;font-family:var(--mono)">{{ uc.filename }}</div>
+                <div style="font-size:11px;color:var(--text3)">
+                  {{ fmtSize(uc.size) }}
+                  <span v-if="uc.inbounds && uc.inbounds.length"> · {{ uc.inbounds.length }} 个入站</span>
+                </div>
+              </div>
+              <span v-if="params.configMode === 'upload' && params.uploadedConfigFile === uc.filename"
+                style="color:var(--accent);font-size:14px">✓</span>
+            </button>
+          </div>
 
         </div>
         <div style="padding:10px 16px;border-top:1px solid var(--border);text-align:right">
@@ -325,24 +335,28 @@ function savePersistedParams(p) {
 
 const _savedParams = loadPersistedParams()
 const params = reactive({
-  configMode:     _savedParams?.configMode     || 'node',
-  nodeId:         _savedParams?.nodeId         || '',
-  subscriptionId: _savedParams?.subscriptionId || '',
-  subNodeIdx:     _savedParams?.subNodeIdx     ?? -1,
-  profileId:      _savedParams?.profileId      || '',
-  routeMode:      _savedParams?.routeMode      || 'whitelist',
-  blockAds:       _savedParams?.blockAds       ?? true,
+  configMode:          _savedParams?.configMode          || 'node',
+  nodeId:              _savedParams?.nodeId              || '',
+  subscriptionId:      _savedParams?.subscriptionId      || '',
+  subNodeIdx:          _savedParams?.subNodeIdx          ?? -1,
+  profileId:           _savedParams?.profileId           || '',
+  uploadedConfigFile:  _savedParams?.uploadedConfigFile  || '',
+  routeMode:           _savedParams?.routeMode           || 'whitelist',
+  blockAds:            _savedParams?.blockAds            ?? true,
 })
 
 // Watch and persist
 // persist params
 watch(() => ({ ...params }), (v) => savePersistedParams(v), { deep: true })
 
+// Refresh uploaded configs list when picker opens
+watch(showProfilePicker, (v) => { if (v) loadUploadedConfigs() })
+
 const canStart = computed(() => {
   if (params.configMode === 'node') return !!params.nodeId
   if (params.configMode === 'subnode') return !!params.subscriptionId && params.subNodeIdx >= 0
   if (params.configMode === 'profile') return !!params.profileId
-  if (params.configMode === 'upload') return true
+  if (params.configMode === 'upload') return !!params.uploadedConfigFile
   return false
 })
 
@@ -357,11 +371,25 @@ function pickProfile(prof) {
   showProfilePicker.value = false
 }
 
-function pickUpload() {
+const uploadedConfigs = ref([])
+
+async function loadUploadedConfigs() {
+  try { uploadedConfigs.value = await api('GET', '/config/list') } catch {}
+}
+
+function pickUploadedConfig(uc) {
   params.configMode = 'upload'
   params.profileId  = ''
-  selectedProfileLabel.value = '📁 已上传的 JSON 配置'
+  params.uploadedConfigFile = uc.filename
+  selectedProfileLabel.value = '📁 ' + uc.filename
   showProfilePicker.value = false
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
 // ── Node picker ───────────────────────────────────────────────────────────
@@ -393,13 +421,14 @@ async function doStart() {
   starting.value = true; startErr.value = ''
   try {
     await api('POST', '/start', {
-      configMode:     params.configMode,
-      nodeId:         params.nodeId,
-      subscriptionId: params.subscriptionId,
-      subNodeIdx:     params.subNodeIdx,
-      profileId:      params.profileId,
-      routeMode:      params.routeMode,
-      blockAds:       params.blockAds,
+      configMode:          params.configMode,
+      nodeId:              params.nodeId,
+      subscriptionId:      params.subscriptionId,
+      subNodeIdx:          params.subNodeIdx,
+      profileId:           params.profileId,
+      uploadedConfigFile:  params.uploadedConfigFile,
+      routeMode:           params.routeMode,
+      blockAds:            params.blockAds,
     })
     await statusStore.fetch()
     logsStore.startSSE()
@@ -446,13 +475,15 @@ onMounted(async () => {
   profilesStore.load()
   nodesStore.load()
   subsStore.load()
+  loadUploadedConfigs()
   // Restore labels for persisted params
   if (params.configMode === 'profile' && params.profileId) {
     await profilesStore.load()
     const prof = profilesStore.profiles.find(p => p.id === params.profileId)
     if (prof) selectedProfileLabel.value = '📄 ' + prof.name
   } else if (params.configMode === 'upload') {
-    selectedProfileLabel.value = '📁 已上传的 JSON 配置'
+    const fname = params.uploadedConfigFile
+    selectedProfileLabel.value = fname ? ('📁 ' + fname) : '📁 已上传的 JSON 配置'
   } else if (params.configMode === 'node' && params.nodeId) {
     await nodesStore.load()
     const n = nodesStore.nodes.find(n => n.id === params.nodeId)
