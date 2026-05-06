@@ -72,16 +72,21 @@ type savedState struct {
 // saved from the Settings page. Influences nft rules, routing, and inbounds
 // for every config mode (node / subscription / upload).
 type ProxySettings struct {
-	TCPMode  config.TCPMode `json:"tcpMode"`
-	UDPMode  config.UDPMode `json:"udpMode"`
-	LanProxy bool           `json:"lanProxy"`
-	IPv6     bool           `json:"ipv6"`
-	BypassCN bool           `json:"bypassCN"`
+	SystemProxy bool           `json:"systemProxy"` // true = inject mixed-in + set OS proxy
+	TCPMode     config.TCPMode `json:"tcpMode"`     // only used when SystemProxy=false
+	UDPMode     config.UDPMode `json:"udpMode"`     // only used when SystemProxy=false
+	LanProxy    bool           `json:"lanProxy"`
+	IPv6        bool           `json:"ipv6"`
+	BypassCN    bool           `json:"bypassCN"`
 }
 
 // toProxyModes converts ProxySettings to the config.ProxyModes struct used
 // by the builder and firewall packages.
+// When SystemProxy is enabled, transparent proxy modes are forced off.
 func (ps ProxySettings) toProxyModes() config.ProxyModes {
+	if ps.SystemProxy {
+		return config.ProxyModes{TCP: config.TCPModeOff, UDP: config.UDPModeOff}
+	}
 	tcp := ps.TCPMode
 	if tcp == "" {
 		tcp = config.TCPModeOff
@@ -93,9 +98,10 @@ func (ps ProxySettings) toProxyModes() config.ProxyModes {
 	return config.ProxyModes{TCP: tcp, UDP: udp}
 }
 
-// isSystemProxyOnly returns true when no transparent proxy is configured.
-func (ps ProxySettings) isSystemProxyOnly() bool {
-	return ps.toProxyModes().IsSystemProxyOnly()
+// wantsSystemProxy returns true when mixed-in should be injected and the OS
+// system proxy should be set to point at it.
+func (ps ProxySettings) wantsSystemProxy() bool {
+	return ps.SystemProxy
 }
 
 // Manager controls the sing-box subprocess and firewall rules.
@@ -392,7 +398,7 @@ func (m *Manager) Start(p StartParams) error {
 
 	// Patch the run-time config: inject managed inbounds, experimental, log.
 	// This runs for every config mode so the settings always take effect.
-	if err := patchConfig(m.RunConfigPath(), modes, ss, ps.LanProxy); err != nil {
+	if err := patchConfig(m.RunConfigPath(), modes, ss, ps.LanProxy, ps.SystemProxy); err != nil {
 		return fmt.Errorf("patch config: %w", err)
 	}
 
@@ -476,7 +482,7 @@ func (m *Manager) Start(p StartParams) error {
 	m.startScheduler()
 
 	// System proxy: only when both TCP and UDP are "off" (no transparent proxy).
-	if ps.isSystemProxyOnly() {
+	if ps.wantsSystemProxy() {
 		if err := sysproxy.Set(ports.Mixed); err != nil {
 			m.appendLog("warn: set system proxy: " + err.Error())
 		} else {
@@ -491,7 +497,7 @@ func (m *Manager) Start(p StartParams) error {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		firewall.Stop()
-		if m.activeProxySettings.isSystemProxyOnly() {
+		if m.activeProxySettings.wantsSystemProxy() {
 			if err := sysproxy.Clear(); err != nil {
 				log.Printf("warn: clear system proxy: %v", err)
 			}
@@ -529,7 +535,7 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	firewall.Stop()
-	if m.activeProxySettings.isSystemProxyOnly() {
+	if m.activeProxySettings.wantsSystemProxy() {
 		if err := sysproxy.Clear(); err != nil {
 			log.Printf("warn: clear system proxy: %v", err)
 		}
