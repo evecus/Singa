@@ -725,8 +725,8 @@ onMounted(() => {
   loadWorkDir()
   api('GET', '/proxy-settings').then(r => {
     systemProxy.value = !!r.systemProxy
-    tcpMode.value  = r.tcpMode  || 'redir'
-    udpMode.value  = r.udpMode  || 'tproxy'
+    tcpMode.value  = (r.tcpMode  && r.tcpMode  !== 'off') ? r.tcpMode  : 'redir'
+    udpMode.value  = (r.udpMode  && r.udpMode  !== 'off') ? r.udpMode  : 'tproxy'
     lanProxy.value = !!r.lanProxy
     ipv6.value     = !!r.ipv6
     bypassCN.value = !!r.bypassCN
