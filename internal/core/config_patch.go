@@ -134,11 +134,17 @@ func injectManagedInbounds(
 
 	// tun-in: when TCP=tun OR UDP=tun
 	if modes.NeedsTunInbound() {
+		stack := in.TunStack
+		if stack == "" {
+			stack = "mixed"
+		}
 		ibs = append(ibs, toRawMap(jsonMap{
 			"tag":            "tun-in",
 			"type":           "tun",
 			"interface_name": in.TunInterface,
 			"address":        in.TunAddress,
+			"mtu":            9000,
+			"stack":          stack,
 			"auto_route":     false,
 			"auto_redirect":  false,
 		}))
