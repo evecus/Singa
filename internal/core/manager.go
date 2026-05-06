@@ -752,6 +752,30 @@ func (m *Manager) SaveSingaSettings(ss SingaSettings) error {
 
 // ── Status ─────────────────────────────────────────────────────────────────
 
+// readProcessRSS reads VmRSS from /proc/<pid>/status and returns KB.
+// Returns 0 on any error.
+func readProcessRSS(pid int) int64 {
+	if pid == 0 {
+		return 0
+	}
+	path := fmt.Sprintf("/proc/%d/status", pid)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "VmRSS:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				var kb int64
+				fmt.Sscan(fields[1], &kb)
+				return kb
+			}
+		}
+	}
+	return 0
+}
+
 func (m *Manager) Status() map[string]interface{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -760,6 +784,7 @@ func (m *Manager) Status() map[string]interface{} {
 		pid = m.cmd.Process.Pid
 	}
 	ps := m.activeProxySettings
+	rssKB := readProcessRSS(pid)
 	return map[string]interface{}{
 		"state":      m.state,
 		"configMode": m.params.ConfigMode,
@@ -771,6 +796,7 @@ func (m *Manager) Status() map[string]interface{} {
 		"blockAds":   m.params.BlockAds,
 		"nodeId":     m.params.NodeID,
 		"pid":        pid,
+		"rssKB":      rssKB,
 		"ports":      m.ports,
 		"error":      m.errMsg,
 	}
