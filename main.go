@@ -23,6 +23,9 @@ var srsFS embed.FS
 //go:embed assets/cn-bypass.nft
 var cnBypassNft []byte
 
+//go:embed assets/cn-bypass6.nft
+var cnBypass6Nft []byte
+
 func main() {
 	var (
 		dirFlag  string
@@ -70,10 +73,23 @@ func main() {
 	// Extract cn-bypass.nft to dataDir (skips if already present).
 	cnNftDst := filepath.Join(dataDir, "cn-bypass.nft")
 	if _, statErr := os.Stat(cnNftDst); os.IsNotExist(statErr) {
-		if err := os.WriteFile(cnNftDst, cnBypassNft, 0644); err != nil {
-			log.Printf("warn: extract cn-bypass.nft: %v", err)
-		} else {
-			log.Printf("singa: extracted cn-bypass.nft -> %s", cnNftDst)
+		if len(cnBypassNft) > 0 {
+			if err := os.WriteFile(cnNftDst, cnBypassNft, 0644); err != nil {
+				log.Printf("warn: extract cn-bypass.nft: %v", err)
+			} else {
+				log.Printf("singa: extracted cn-bypass.nft -> %s", cnNftDst)
+			}
+		}
+	}
+	// Extract cn-bypass6.nft to dataDir (skips if already present).
+	cn6NftDst := filepath.Join(dataDir, "cn-bypass6.nft")
+	if _, statErr := os.Stat(cn6NftDst); os.IsNotExist(statErr) {
+		if len(cnBypass6Nft) > 0 {
+			if err := os.WriteFile(cn6NftDst, cnBypass6Nft, 0644); err != nil {
+				log.Printf("warn: extract cn-bypass6.nft: %v", err)
+			} else {
+				log.Printf("singa: extracted cn-bypass6.nft -> %s", cn6NftDst)
+			}
 		}
 	}
 
