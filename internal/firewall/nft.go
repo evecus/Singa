@@ -69,6 +69,18 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 		} else {
 			log.Printf("firewall: cn-bypass.nft not found at %s", cnNftPath)
 		}
+		if ipv6 {
+			cn6NftPath := filepath.Join(filepath.Dir(nftConfPath), "cn-bypass6.nft")
+			if _, err := os.Stat(cn6NftPath); err == nil {
+				if err := runCmd("nft -f " + cn6NftPath); err != nil {
+					log.Printf("firewall: cn-bypass6 load: %v", err)
+				} else {
+					log.Println("firewall: CN bypass IPv6 rules loaded")
+				}
+			} else {
+				log.Printf("firewall: cn-bypass6.nft not found at %s", cn6NftPath)
+			}
+		}
 	}
 	return nil
 }
@@ -194,6 +206,13 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 	// interface6 is only defined when IPv6 is enabled so it is actually used.
 	if ipv6 {
 		s.WriteString("    set interface6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+	}
+
+	if bypassCN {
+		s.WriteString("    set cn_bypass {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n")
+		if ipv6 {
+			s.WriteString("    set cn_bypass6 {\n        type ipv6_addr\n        flags interval\n        auto-merge\n    }\n")
+		}
 	}
 
 	if ipfSetDef != "" {
@@ -409,7 +428,6 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 // avoids spurious "ip rule del" errors when those routes were never added.
 func cleanup(modes config.ProxyModes, ipv6 bool, tunDevice string) {
 	_ = runCmd("nft delete table inet singa")
-	_ = runCmd("nft delete table inet singa_cnbypass")
 
 	if modes.NeedsTProxyInbound() {
 		cleanupTProxyRoutes(ipv6)
