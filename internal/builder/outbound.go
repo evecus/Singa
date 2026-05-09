@@ -2,6 +2,7 @@ package builder
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/singa/internal/node"
@@ -22,6 +23,14 @@ func NodeToOutbound(n *node.Node, tag string) (map[string]interface{}, error) {
 		return tuicOB(n, tag)
 	case node.ProtoHysteria2:
 		return hy2OB(n, tag)
+	case node.ProtoHTTP:
+		return httpOB(n, tag)
+	case node.ProtoHTTPS:
+		return httpsOB(n, tag)
+	case node.ProtoSOCKS5:
+		return socks5OB(n, tag)
+	case node.ProtoWireGuard:
+		return wireguardOB(n, tag)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", n.Protocol)
 	}
@@ -118,6 +127,100 @@ func hy2OB(n *node.Node, tag string) (map[string]interface{}, error) {
 		}
 	}
 	setTLS(ob, n)
+	return ob, nil
+}
+
+func httpOB(n *node.Node, tag string) (map[string]interface{}, error) {
+	ob := M{
+		"type":        "http",
+		"tag":         tag,
+		"server":      n.Address,
+		"server_port": n.Port,
+	}
+	if n.UUID != "" || n.Password != "" {
+		ob["username"] = n.UUID
+		ob["password"] = n.Password
+	}
+	return ob, nil
+}
+
+func httpsOB(n *node.Node, tag string) (map[string]interface{}, error) {
+	ob := M{
+		"type":        "http",
+		"tag":         tag,
+		"server":      n.Address,
+		"server_port": n.Port,
+	}
+	if n.UUID != "" || n.Password != "" {
+		ob["username"] = n.UUID
+		ob["password"] = n.Password
+	}
+	setTLS(ob, n)
+	return ob, nil
+}
+
+func socks5OB(n *node.Node, tag string) (map[string]interface{}, error) {
+	ob := M{
+		"type":        "socks",
+		"tag":         tag,
+		"server":      n.Address,
+		"server_port": n.Port,
+		"version":     "5",
+	}
+	if n.UUID != "" || n.Password != "" {
+		ob["username"] = n.UUID
+		ob["password"] = n.Password
+	}
+	return ob, nil
+}
+
+func wireguardOB(n *node.Node, tag string) (map[string]interface{}, error) {
+	peer := M{
+		"server":      n.Address,
+		"server_port": n.Port,
+		"public_key":  n.PublicKeyWG,
+	}
+	if n.PreSharedKey != "" {
+		peer["pre_shared_key"] = n.PreSharedKey
+	}
+	if n.Reserved != "" {
+		// reserved can be "0,0,0" (decimal bytes) or base64; pass as-is,
+		// sing-box accepts both string and array forms.
+		parts := strings.Split(n.Reserved, ",")
+		if len(parts) == 3 {
+			nums := make([]int, 0, 3)
+			ok := true
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				v, err := strconv.Atoi(p)
+				if err != nil {
+					ok = false
+					break
+				}
+				nums = append(nums, v)
+			}
+			if ok {
+				peer["reserved"] = nums
+			} else {
+				peer["reserved"] = n.Reserved // base64 fallback
+			}
+		} else {
+			peer["reserved"] = n.Reserved
+		}
+	}
+
+	ob := M{
+		"type":        "wireguard",
+		"tag":         tag,
+		"private_key": n.PrivateKey,
+		"peers":       []M{peer},
+	}
+	if n.LocalAddress != "" {
+		ob["local_address"] = strings.Split(n.LocalAddress, ",")
+	}
+	if n.MTU > 0 {
+		ob["mtu"] = n.MTU
+	}
 	return ob, nil
 }
 

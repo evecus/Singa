@@ -16,6 +16,10 @@ const (
 	ProtoSS        Protocol = "ss"
 	ProtoTUIC      Protocol = "tuic"
 	ProtoHysteria2 Protocol = "hysteria2"
+	ProtoHTTP      Protocol = "http"
+	ProtoHTTPS     Protocol = "https"
+	ProtoSOCKS5    Protocol = "socks5"
+	ProtoWireGuard Protocol = "wireguard"
 )
 
 type Node struct {
@@ -65,6 +69,14 @@ type Node struct {
 	ObfsPassword string `json:"obfs_password,omitempty"`
 	Ports        string `json:"ports,omitempty"`
 	PinSHA256    string `json:"pin_sha256,omitempty"`
+
+	// WireGuard
+	PrivateKey   string `json:"private_key,omitempty"`
+	PublicKeyWG  string `json:"public_key_wg,omitempty"` // peer public key (WG)
+	PreSharedKey string `json:"pre_shared_key,omitempty"`
+	Reserved     string `json:"reserved,omitempty"`   // comma-sep 3 bytes or base64
+	LocalAddress string `json:"local_address,omitempty"` // comma-sep CIDRs
+	MTU          int    `json:"mtu,omitempty"`
 }
 
 func NewID() string {
@@ -107,6 +119,14 @@ func FromMap(m map[string]any) (*Node, error) {
 		proto = ProtoTUIC
 	case "hysteria2":
 		proto = ProtoHysteria2
+	case "http":
+		proto = ProtoHTTP
+	case "https":
+		proto = ProtoHTTPS
+	case "socks":
+		proto = ProtoSOCKS5
+	case "wireguard":
+		proto = ProtoWireGuard
 	default:
 		return nil, fmt.Errorf("unsupported proxy type %q", typ)
 	}
@@ -176,6 +196,33 @@ func FromMap(m map[string]any) (*Node, error) {
 
 	// TUIC
 	n.CongestionControl = str("congestion_control")
+
+	// WireGuard
+	n.PrivateKey   = str("private_key")
+	n.PreSharedKey = str("pre_shared_key")
+	n.Reserved     = str("reserved")
+	if mtu, ok := m["mtu"].(float64); ok {
+		n.MTU = int(mtu)
+	}
+	if peer, ok := m["peers"].([]interface{}); ok && len(peer) > 0 {
+		if p, ok := peer[0].(map[string]any); ok {
+			if pk, ok := p["public_key"].(string); ok {
+				n.PublicKeyWG = pk
+			}
+			if psk, ok := p["pre_shared_key"].(string); ok && n.PreSharedKey == "" {
+				n.PreSharedKey = psk
+			}
+		}
+	}
+	if la, ok := m["local_address"].([]interface{}); ok {
+		parts := make([]string, 0, len(la))
+		for _, v := range la {
+			if s, ok := v.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		n.LocalAddress = strings.Join(parts, ",")
+	}
 
 	return n, nil
 }

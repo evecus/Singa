@@ -45,6 +45,14 @@ func ParseLink(s string) (*Node, error) {
 		return parseTUIC(s)
 	case strings.HasPrefix(low, "hy2://"), strings.HasPrefix(low, "hysteria2://"):
 		return parseHysteria2(s)
+	case strings.HasPrefix(low, "http://"):
+		return parseHTTP(s)
+	case strings.HasPrefix(low, "https://"):
+		return parseHTTPS(s)
+	case strings.HasPrefix(low, "socks5://"), strings.HasPrefix(low, "socks://"):
+		return parseSOCKS5(s)
+	case strings.HasPrefix(low, "wireguard://"), strings.HasPrefix(low, "wg://"):
+		return parseWireGuard(s)
 	default:
 		return nil, fmt.Errorf("unsupported protocol")
 	}
@@ -291,6 +299,113 @@ func parseHysteria2(s string) (*Node, error) {
 	}
 	if mp := qVal(q, "mport"); mp != "" {
 		n.Ports = strings.ReplaceAll(mp, "-", ":")
+	}
+	return n, nil
+}
+
+// ── HTTP ───────────────────────────────────────────────────────────────────
+
+func parseHTTP(s string) (*Node, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol: ProtoHTTP,
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Name:     decodeFragment(u.Fragment),
+	}
+	if u.User != nil {
+		n.UUID = u.User.Username()
+		n.Password, _ = u.User.Password()
+	}
+	return n, nil
+}
+
+// ── HTTPS ──────────────────────────────────────────────────────────────────
+
+func parseHTTPS(s string) (*Node, error) {
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol: ProtoHTTPS,
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Name:     decodeFragment(u.Fragment),
+		TLS:      "tls",
+	}
+	if u.User != nil {
+		n.UUID = u.User.Username()
+		n.Password, _ = u.User.Password()
+	}
+	q := u.Query()
+	if sni := q.Get("sni"); sni != "" {
+		n.SNI = sni
+	}
+	if fp := q.Get("fp"); fp != "" {
+		n.Fingerprint = fp
+	}
+	if q.Get("insecure") == "1" || q.Get("allowInsecure") == "1" {
+		n.Insecure = true
+	}
+	return n, nil
+}
+
+// ── SOCKS5 ─────────────────────────────────────────────────────────────────
+
+func parseSOCKS5(s string) (*Node, error) {
+	// Normalise socks:// → socks5://
+	if strings.HasPrefix(strings.ToLower(s), "socks://") {
+		s = "socks5://" + s[8:]
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol: ProtoSOCKS5,
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Name:     decodeFragment(u.Fragment),
+	}
+	if u.User != nil {
+		n.UUID = u.User.Username()
+		n.Password, _ = u.User.Password()
+	}
+	return n, nil
+}
+
+// ── WireGuard ──────────────────────────────────────────────────────────────
+//
+// Format: wireguard://PRIVATE_KEY@host:port?publicKey=PK&psk=PSK&reserved=R&address=CIDR,CIDR&mtu=MTU#name
+// Also accepts wg:// prefix (normalised above).
+
+func parseWireGuard(s string) (*Node, error) {
+	// Normalise wg:// → wireguard://
+	if strings.HasPrefix(strings.ToLower(s), "wg://") {
+		s = "wireguard://" + s[5:]
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Protocol:   ProtoWireGuard,
+		Address:    u.Hostname(),
+		Port:       atoiSafe(u.Port()),
+		Name:       decodeFragment(u.Fragment),
+		PrivateKey: userDecode(u),
+	}
+	q := u.Query()
+	n.PublicKeyWG  = qVal(q, "publicKey")
+	n.PreSharedKey = qVal(q, "psk")
+	n.Reserved     = qVal(q, "reserved")
+	n.LocalAddress = qVal(q, "address")
+	if mtu := q.Get("mtu"); mtu != "" {
+		n.MTU = atoiSafe(mtu)
 	}
 	return n, nil
 }
