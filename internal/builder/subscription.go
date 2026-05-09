@@ -907,10 +907,11 @@ func ValidateWizardConfig(wizardRaw json.RawMessage) []ValidationError {
 		return []ValidationError{{Location: "root", Message: "invalid JSON: " + err.Error()}}
 	}
 
-	obIdx := buildObIndex(&wc)    // id -> tag for outbounds
-	_ = buildRSIndex(&wc)         // id -> tag for rulesets (reserved for future validation)
-	dnsSrvIdx := buildDNSSrvIndex(&wc) // id -> tag for DNS servers
-	// Also build tag sets for direct lookup
+	// ── Index maps: id→tag and tag→bool ──────────────────────────────────────
+	obIdx    := buildObIndex(&wc)      // outbound id -> tag
+	rsIdx    := buildRSIndex(&wc)      // ruleset  id -> tag
+	dnsSrvIdx := buildDNSSrvIndex(&wc) // dns srv  id -> tag
+
 	obTags := map[string]bool{"direct": true, "block": true}
 	for _, ob := range wc.Outbounds {
 		obTags[ob.Tag] = true
@@ -919,6 +920,10 @@ func ValidateWizardConfig(wizardRaw json.RawMessage) []ValidationError {
 	for _, rs := range wc.Route.RuleSet {
 		rsTags[rs.Tag] = true
 	}
+	rsIDs := map[string]bool{}
+	for id := range rsIdx {
+		rsIDs[id] = true
+	}
 	dnsSrvTags := map[string]bool{}
 	for _, s := range wc.DNS.Servers {
 		dnsSrvTags[s.Tag] = true
@@ -926,105 +931,126 @@ func ValidateWizardConfig(wizardRaw json.RawMessage) []ValidationError {
 
 	var errs []ValidationError
 
-	resolveOb := func(ref WizardOutboundRef, loc string) {
-		if ref.Type == "Subscription" || ref.Type == "Subscribe" {
-			return // subscription refs are validated at runtime
-		}
-		// Check by ID first, then by tag
-		if ref.ID != "" {
-			if _, ok := obIdx[ref.ID]; !ok {
-				errs = append(errs, ValidationError{
-					Location: loc,
-					Message:  "引用了不存在的出站 ID: " + ref.ID,
-				})
-			}
+	// ── Helper: resolve outbound by id or tag ─────────────────────────────────
+	checkOb := func(ref, loc string) {
+		if ref == "" {
 			return
 		}
-		if ref.Tag != "" {
-			if !obTags[ref.Tag] {
-				errs = append(errs, ValidationError{
-					Location: loc,
-					Message:  "引用了不存在的出站 tag: " + ref.Tag,
-				})
+		if _, ok := obIdx[ref]; ok {
+			return
+		}
+		if obTags[ref] {
+			return
+		}
+		errs = append(errs, ValidationError{Location: loc, Message: "引用了不存在的出站 tag/ID: " + ref})
+	}
+
+	// ── Helper: resolve outbound ref struct ───────────────────────────────────
+	checkObRef := func(ref WizardOutboundRef, loc string) {
+		if ref.Type == "Subscription" || ref.Type == "Subscribe" {
+			return
+		}
+		id := ref.ID
+		if id == "" {
+			id = ref.Tag
+		}
+		checkOb(id, loc)
+	}
+
+	// ── Helper: resolve dns server by id or tag ───────────────────────────────
+	checkDNS := func(ref, loc string) {
+		if ref == "" {
+			return
+		}
+		if _, ok := dnsSrvIdx[ref]; ok {
+			return
+		}
+		if dnsSrvTags[ref] {
+			return
+		}
+		errs = append(errs, ValidationError{Location: loc, Message: "引用了不存在的 DNS 服务器 tag/ID: " + ref})
+	}
+
+	// ── Helper: resolve ruleset ids from comma-separated payload ──────────────
+	checkRulesetPayload := func(payload, loc string) {
+		for _, id := range splitPayload(payload) {
+			if id == "" || id == "__fakeip__" {
+				continue
 			}
+			if rsIDs[id] || rsTags[id] {
+				continue
+			}
+			errs = append(errs, ValidationError{Location: loc, Message: "rule_set 引用了不存在的规则集 tag/ID: " + id})
 		}
 	}
 
-	// Validate outbound internal references
+	// ── 1. outbound 内部引用 ─────────────────────────────────────────────────
 	for i, ob := range wc.Outbounds {
 		for j, ref := range ob.Outbounds {
-			resolveOb(ref, fmt.Sprintf("outbound[%d](%s).outbounds[%d]", i, ob.Tag, j))
+			checkObRef(ref, fmt.Sprintf("outbound[%d](%s).outbounds[%d]", i, ob.Tag, j))
 		}
 	}
 
-	// Validate route.final
-	if f := wc.Route.Final; f != "" {
-		if !obTags[f] {
-			// try resolve by checking obIdx values
-			found := false
-			for _, t := range obIdx {
-				if t == f {
-					found = true
-					break
-				}
-			}
-			if !found {
-				errs = append(errs, ValidationError{
-					Location: "route.final",
-					Message:  "引用了不存在的出站 tag: " + f,
-				})
-			}
+	// ── 2. route.final ────────────────────────────────────────────────────────
+	checkOb(wc.Route.Final, "route.final")
+
+	// ── 3. route.default_domain_resolver ─────────────────────────────────────
+	checkDNS(wc.Route.DefaultDomainResolver, "route.default_domain_resolver")
+
+	// ── 4. route.rule_set[].download_detour ──────────────────────────────────
+	for i, rs := range wc.Route.RuleSet {
+		if rs.DownloadDetour != "" {
+			checkOb(rs.DownloadDetour, fmt.Sprintf("route.rule_set[%d](%s).download_detour", i, rs.Tag))
 		}
 	}
 
-	// Validate route rules
+	// ── 5. route.rules ───────────────────────────────────────────────────────
 	for i, rule := range wc.Route.Rules {
 		if rule.Type == "InsertionPoint" {
 			continue
 		}
-		if rule.Outbound != "" && !obTags[rule.Outbound] {
-			// Try lookup by ID
-			if _, ok := obIdx[rule.Outbound]; !ok {
-				errs = append(errs, ValidationError{
-					Location: fmt.Sprintf("route.rules[%d]", i),
-					Message:  "outbound 引用了不存在的 tag/ID: " + rule.Outbound,
-				})
-			}
-		}
-		// route rules reference server (DNS) for DNS action rules
-		if rule.Server != "" && !dnsSrvTags[rule.Server] {
-			if _, ok := dnsSrvIdx[rule.Server]; !ok {
-				errs = append(errs, ValidationError{
-					Location: fmt.Sprintf("route.rules[%d]", i),
-					Message:  "server 引用了不存在的 DNS 服务器 tag/ID: " + rule.Server,
-				})
-			}
+		loc := fmt.Sprintf("route.rules[%d]", i)
+		checkOb(rule.Outbound, loc+".outbound")
+		checkDNS(rule.Server, loc+".server")
+		if rule.Type == "rule_set" {
+			checkRulesetPayload(rule.Payload, loc+".rule_set")
 		}
 	}
 
-	// Validate DNS rules
+	// ── 6. dns.final ─────────────────────────────────────────────────────────
+	checkDNS(wc.DNS.Final, "dns.final")
+
+	// ── 7. dns.servers[].domain_resolver & detour ────────────────────────────
+	for i, srv := range wc.DNS.Servers {
+		loc := fmt.Sprintf("dns.servers[%d](%s)", i, srv.Tag)
+		checkDNS(srv.DomainResolver, loc+".domain_resolver")
+		checkOb(srv.Detour, loc+".detour")
+	}
+
+	// ── 8. dns.rules[].server & rule_set payload ─────────────────────────────
 	for i, dr := range wc.DNS.Rules {
-		if dr.Server != "" && !dnsSrvTags[dr.Server] {
-			if _, ok := dnsSrvIdx[dr.Server]; !ok {
-				errs = append(errs, ValidationError{
-					Location: fmt.Sprintf("dns.rules[%d]", i),
-					Message:  "server 引用了不存在的 DNS 服务器 tag/ID: " + dr.Server,
-				})
-			}
+		if dr.Type == "InsertionPoint" {
+			continue
 		}
-	}
-
-	// Validate route.default_domain_resolver
-	if r := wc.Route.DefaultDomainResolver; r != "" {
-		if !dnsSrvTags[r] {
-			if _, ok := dnsSrvIdx[r]; !ok {
-				errs = append(errs, ValidationError{
-					Location: "route.default_domain_resolver",
-					Message:  "引用了不存在的 DNS 服务器 tag/ID: " + r,
-				})
-			}
+		loc := fmt.Sprintf("dns.rules[%d]", i)
+		checkDNS(dr.Server, loc+".server")
+		if dr.Type == "rule_set" {
+			checkRulesetPayload(dr.Payload, loc+".rule_set")
 		}
 	}
 
 	return errs
+}
+
+// splitPayload splits a comma-separated payload string into trimmed non-empty parts.
+func splitPayload(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

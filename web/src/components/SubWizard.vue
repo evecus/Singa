@@ -1227,7 +1227,24 @@ function saveOutbound() {
   showObModal.value = false
 }
 function deleteOutbound(idx) {
-  if (!confirm(`删除出站「${form.outbounds[idx].tag}」？`)) return
+  const ob = form.outbounds[idx]
+  if (!confirm(`删除出站「${ob.tag}」？\n\n所有对该出站的引用（包含关系、路由规则、route.final）将被自动清除。`)) return
+  const deadId = ob.id
+  // 1. 从其他出站的 outbounds[] 里移除
+  form.outbounds.forEach(o => {
+    if (Array.isArray(o.outbounds)) {
+      o.outbounds = o.outbounds.filter(r => r.id !== deadId)
+    }
+  })
+  // 2. 路由规则 outbound 引用
+  form.route.rules.forEach(r => { if (r.outbound === deadId) r.outbound = '' })
+  // 3. route.final
+  if (form.route.final === deadId) form.route.final = ''
+  // 4. 规则集 download_detour
+  form.route.rule_set.forEach(rs => { if (rs.download_detour === deadId) rs.download_detour = '' })
+  // 5. DNS server detour
+  form.dns.servers.forEach(s => { if (s.detour === deadId) s.detour = '' })
+  // 6. 删除自身
   form.outbounds.splice(idx, 1)
 }
 function countOutbounds(ob) {
@@ -1439,12 +1456,170 @@ function renderDnsRulePayload(rule) {
 // ── Navigation ─────────────────────────────────────────────────────────────
 function nextStep() {
   if (step.value === 0 && (!form.name.trim() || !form.url.trim())) { alert('请填写名称和订阅 URL'); return }
+  // 离开出站步骤时做快速悬空引用预检（不阻止，仅警告）
+  if (step.value === 3) {
+    const obIds = new Set(['direct','block',...form.outbounds.map(o => o.id)])
+    const dead = []
+    if (form.route.final && !obIds.has(form.route.final)) dead.push('route.final')
+    form.route.rules.forEach((r,i) => { if (r.outbound && !obIds.has(r.outbound)) dead.push(`route.rules[${i}].outbound`) })
+    if (dead.length) alert(`⚠ 检测到 ${dead.length} 处出站引用可能失效：\n${dead.join('\n')}\n\n保存时将自动清理。`)
+  }
   step.value++
 }
 
+// ── Ref sanitizer (client-side, runs before every save) ────────────────────
+// Returns list of { location, message } that were cleaned up.
+function sanitizeRefs() {
+  const fixed = []
+
+  const obIds  = new Set([
+    'direct', 'block',
+    ...form.outbounds.map(o => o.id),
+  ])
+  const rsIds  = new Set(form.route.rule_set.map(r => r.id))
+  const srvIds = new Set(form.dns.servers.map(s => s.id))
+
+  const cleanPayload = (payload, loc) => {
+    if (!payload) return payload
+    const parts = payload.split(',').map(s => s.trim()).filter(Boolean)
+    const kept  = parts.filter(id => id === '__fakeip__' || rsIds.has(id))
+    const dead  = parts.filter(id => id !== '__fakeip__' && !rsIds.has(id))
+    if (dead.length) fixed.push({ location: loc, message: `rule_set 移除了不存在的引用: ${dead.join(', ')}` })
+    return kept.join(',')
+  }
+
+  // 1. outbound 内部引用
+  form.outbounds.forEach((ob, i) => {
+    if (!Array.isArray(ob.outbounds)) return
+    const before = ob.outbounds.length
+    ob.outbounds = ob.outbounds.filter(r => {
+      if (r.type === 'Subscription' || r.type === 'Subscribe') return true
+      return obIds.has(r.id)
+    })
+    if (ob.outbounds.length < before)
+      fixed.push({ location: `outbound[${i}](${ob.tag}).outbounds`, message: `移除了 ${before - ob.outbounds.length} 个不存在的引用` })
+  })
+
+  // 2. route.final
+  if (form.route.final && !obIds.has(form.route.final)) {
+    fixed.push({ location: 'route.final', message: `已清空（引用不存在的出站 "${form.route.final}"）` })
+    form.route.final = ''
+  }
+
+  // 3. route.default_domain_resolver
+  if (form.route.default_domain_resolver && !srvIds.has(form.route.default_domain_resolver)) {
+    fixed.push({ location: 'route.default_domain_resolver', message: `已清空（引用不存在的 DNS 服务器 "${form.route.default_domain_resolver}"）` })
+    form.route.default_domain_resolver = ''
+  }
+
+  // 4. route.rule_set[].download_detour
+  form.route.rule_set.forEach((rs, i) => {
+    if (rs.download_detour && !obIds.has(rs.download_detour)) {
+      fixed.push({ location: `route.rule_set[${i}](${rs.tag}).download_detour`, message: `已清空（引用不存在的出站 "${rs.download_detour}"）` })
+      rs.download_detour = ''
+    }
+  })
+
+  // 5. route.rules
+  form.route.rules.forEach((rule, i) => {
+    if (rule.type === 'InsertionPoint') return
+    if (rule.outbound && !obIds.has(rule.outbound)) {
+      fixed.push({ location: `route.rules[${i}].outbound`, message: `已清空（引用不存在的出站 "${rule.outbound}"）` })
+      rule.outbound = ''
+    }
+    if (rule.server && !srvIds.has(rule.server)) {
+      fixed.push({ location: `route.rules[${i}].server`, message: `已清空（引用不存在的 DNS 服务器 "${rule.server}"）` })
+      rule.server = ''
+    }
+    if (rule.type === 'rule_set') {
+      rule.payload = cleanPayload(rule.payload, `route.rules[${i}].rule_set`)
+    }
+  })
+
+  // 6. dns.final
+  if (form.dns.final && !srvIds.has(form.dns.final)) {
+    fixed.push({ location: 'dns.final', message: `已清空（引用不存在的 DNS 服务器 "${form.dns.final}"）` })
+    form.dns.final = ''
+  }
+
+  // 7. dns.servers[].domain_resolver & detour
+  form.dns.servers.forEach((s, i) => {
+    if (s.domain_resolver && !srvIds.has(s.domain_resolver)) {
+      fixed.push({ location: `dns.servers[${i}](${s.tag}).domain_resolver`, message: `已清空（引用不存在的 DNS 服务器 "${s.domain_resolver}"）` })
+      s.domain_resolver = ''
+    }
+    if (s.detour && !obIds.has(s.detour)) {
+      fixed.push({ location: `dns.servers[${i}](${s.tag}).detour`, message: `已清空（引用不存在的出站 "${s.detour}"）` })
+      s.detour = ''
+    }
+  })
+
+  // 8. dns.rules[].server & rule_set
+  form.dns.rules.forEach((rule, i) => {
+    if (rule.type === 'InsertionPoint') return
+    if (rule.server && !srvIds.has(rule.server)) {
+      fixed.push({ location: `dns.rules[${i}].server`, message: `已清空（引用不存在的 DNS 服务器 "${rule.server}"）` })
+      rule.server = ''
+    }
+    if (rule.type === 'rule_set') {
+      rule.payload = cleanPayload(rule.payload, `dns.rules[${i}].rule_set`)
+    }
+  })
+
+  return fixed
+}
+
 // ── Save ───────────────────────────────────────────────────────────────────
+const saveErrors  = ref([])
+const showErrModal = ref(false)
+
 async function save() {
   if (!form.name.trim() || !form.url.trim()) { step.value = 0; return }
+
+  // Step 1: client-side sanitize
+  const fixed = sanitizeRefs()
+  if (fixed.length) {
+    const list = fixed.map(e => `• [${e.location}] ${e.message}`).join('\n')
+    const ok = confirm(`⚠ 保存前自动清理了以下悬空引用：\n\n${list}\n\n点「确定」继续保存，「取消」返回检查。`)
+    if (!ok) return
+  }
+
+  saving.value = true
+  saveErrors.value = []
+
+  try {
+    const wizardConfig = JSON.parse(JSON.stringify({
+      log: form.log, clashAPI: form.clashAPI, cacheFile: form.cacheFile,
+      inbounds: form.inbounds, outbounds: form.outbounds,
+      route: form.route, dns: form.dns,
+    }))
+
+    // Step 2: server-side validate
+    try {
+      const { api } = await import('../api.js')
+      const vRes = await api('POST', '/profiles/validate', { wizardConfig })
+      if (!vRes.ok && vRes.errors?.length) {
+        saveErrors.value = vRes.errors
+        showErrModal.value = true
+        saving.value = false
+        return   // 阻止保存，让用户看错误列表后决定
+      }
+    } catch { /* 网络错误时跳过验证，不阻止保存 */ }
+
+    let sub
+    if (props.sub) {
+      sub = await subsStore.updateMeta(props.sub.id, { name: form.name.trim(), url: form.url.trim(), wizardConfig })
+    } else {
+      sub = await subsStore.add(form.name.trim(), form.url.trim(), wizardConfig)
+    }
+    emit('saved', sub)
+  } catch (e) {
+    alert('保存失败: ' + e.message)
+  } finally { saving.value = false }
+}
+
+async function saveForce() {
+  showErrModal.value = false
   saving.value = true
   try {
     const wizardConfig = JSON.parse(JSON.stringify({
@@ -1454,7 +1629,7 @@ async function save() {
     }))
     let sub
     if (props.sub) {
-      sub = await subsStore.updateMeta(props.sub.id, { name:form.name.trim(), url:form.url.trim(), wizardConfig })
+      sub = await subsStore.updateMeta(props.sub.id, { name: form.name.trim(), url: form.url.trim(), wizardConfig })
     } else {
       sub = await subsStore.add(form.name.trim(), form.url.trim(), wizardConfig)
     }
@@ -1464,6 +1639,38 @@ async function save() {
   } finally { saving.value = false }
 }
 </script>
+
+<!-- ══ Validation Error Modal (teleported outside wizard overlay) ═════════ -->
+<template v-if="showErrModal">
+  <div class="mask" style="z-index:600">
+    <div class="modal" style="max-width:600px;max-height:80vh;display:flex;flex-direction:column">
+      <div class="modal-head">
+        <span>⚠ 配置引用错误</span>
+        <button class="btn-icon" @click="showErrModal=false">✕</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto;flex:1">
+        <div class="whint" style="margin-bottom:12px">
+          以下引用在当前配置中不存在，保存此配置可能导致 sing-box 无法启动。
+          建议返回修正后再保存，或点「强制保存」忽略错误。
+        </div>
+        <div v-for="(e, i) in saveErrors" :key="i"
+          style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)">
+          <span style="color:var(--red);font-size:13px;flex-shrink:0">●</span>
+          <div>
+            <div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-bottom:2px">{{ e.location }}</div>
+            <div style="font-size:13px">{{ e.message }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot" style="gap:8px">
+        <button class="btn btn-ghost" @click="showErrModal=false">返回修正</button>
+        <button class="btn btn-primary" @click="saveForce" :disabled="saving">
+          {{ saving ? '保存中…' : '强制保存（忽略错误）' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
 
 <style scoped>
 .ob-ref-group { border: 1px solid var(--border); border-radius: var(--radius); overflow:hidden; }
