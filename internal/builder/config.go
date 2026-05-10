@@ -28,6 +28,7 @@ func BuildConfig(
 	srsDir string,
 	isReF1nd bool,
 	blockAds bool,
+	fakeip bool,
 ) ([]byte, error) {
 	proxyOB, err := NodeToOutbound(n, "proxy")
 	if err != nil {
@@ -35,7 +36,7 @@ func BuildConfig(
 	}
 
 	cfg := M{
-		"dns":      buildDNS(routeMode, ipv6),
+		"dns":      buildDNS(routeMode, ipv6, fakeip),
 		"inbounds": []interface{}{},
 		"outbounds": []interface{}{
 			proxyOB,
@@ -50,7 +51,7 @@ func BuildConfig(
 
 // ── DNS ────────────────────────────────────────────────────────────────────
 
-func buildDNS(routeMode RouteMode, ipv6 bool) M {
+func buildDNS(routeMode RouteMode, ipv6 bool, fakeip bool) M {
 	strategy := "ipv4_only"
 	if ipv6 {
 		strategy = "prefer_ipv4"
@@ -70,6 +71,15 @@ func buildDNS(routeMode RouteMode, ipv6 bool) M {
 		},
 	}
 
+	if fakeip {
+		servers = append(servers, M{
+			"type":        "fakeip",
+			"tag":         "fakeip-dns",
+			"inet4_range": "198.18.0.0/15",
+			"inet6_range": "fc00::/18",
+		})
+	}
+
 	var rules []interface{}
 	var finalDNS string
 	switch routeMode {
@@ -79,26 +89,42 @@ func buildDNS(routeMode RouteMode, ipv6 bool) M {
 			"action":   "route",
 			"server":   "direct-dns",
 		})
-		finalDNS = "remote-dns"
+		if fakeip {
+			finalDNS = "fakeip-dns"
+		} else {
+			finalDNS = "remote-dns"
+		}
 
 	case RouteModeGFWList:
+		target := "remote-dns"
+		if fakeip {
+			target = "fakeip-dns"
+		}
 		rules = append(rules, M{
 			"rule_set": []string{"geosite-gfw", "geosite-geolocation-!cn"},
 			"action":   "route",
-			"server":   "remote-dns",
+			"server":   target,
 		})
 		finalDNS = "direct-dns"
 
 	case RouteModeGlobal:
-		finalDNS = "remote-dns"
+		if fakeip {
+			finalDNS = "fakeip-dns"
+		} else {
+			finalDNS = "remote-dns"
+		}
 	}
 
-	return M{
+	dns := M{
 		"servers":  servers,
 		"rules":    rules,
 		"final":    finalDNS,
 		"strategy": strategy,
 	}
+	if fakeip {
+		dns["independent_cache"] = true
+	}
+	return dns
 }
 
 // ── Route ──────────────────────────────────────────────────────────────────

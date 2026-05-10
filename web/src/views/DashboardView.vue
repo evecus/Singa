@@ -110,6 +110,13 @@
             </div>
           </template>
 
+          <!-- FakeIP 提示（上传配置文件模式 + FakeIP 开启时）-->
+          <div v-if="params.configMode === 'upload' && singaFakeIP"
+            class="alert alert-warn" style="margin-top:10px;font-size:12px">
+            已开启 FakeIP 模式：系统将自动将 <code>198.18.0.0/15</code> / <code>fc00::/18</code>
+            的流量引导至 sing-box，请确保您的配置文件中已自行配置 FakeIP DNS 服务器。
+          </div>
+
           <div v-if="startErr" class="alert alert-error" style="margin-top:10px">{{ startErr }}</div>
         </div>
 
@@ -269,6 +276,7 @@ const status    = computed(() => statusStore.status)
 const isRunning = computed(() => statusStore.isRunning)
 
 const sbVersion = ref('')
+const singaFakeIP = ref(false)
 const memStr    = ref('—')
 const now       = ref('')
 const starting  = ref(false)
@@ -442,6 +450,7 @@ let clockTimer = null
 onMounted(async () => {
   try { const r = await api('GET', '/singbox/version'); sbVersion.value = r.version } catch {}
   try { const r = await api('GET', '/proxy-settings'); proxySettings.value = r } catch {}
+  try { const r = await api('GET', '/singa-settings'); singaFakeIP.value = !!r.fakeip } catch {}
   profilesStore.load()
   nodesStore.load()
   subsStore.load()

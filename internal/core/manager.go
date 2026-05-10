@@ -345,6 +345,11 @@ func (m *Manager) Start(p StartParams) error {
 	modes := ps.toProxyModes()
 
 	ss := m.loadSingaSettings()
+	// When FakeIP is enabled, force cache on with store_fakeip.
+	if ss.FakeIP {
+		ss.Experimental.CacheEnabled = true
+		ss.Experimental.StoreFakeIP = true
+	}
 	ports.DNS = ss.Inbound.DNSPort
 	ports.TProxy = ss.Inbound.TProxyPort
 	ports.Redirect = ss.Inbound.RedirectPort
@@ -381,7 +386,7 @@ func (m *Manager) Start(p StartParams) error {
 		if n == nil {
 			return fmt.Errorf("node %q not found", p.NodeID)
 		}
-		if err := m.prepareNodeConfig(p, modes, ps.LanProxy, ps.IPv6, n, ports); err != nil {
+		if err := m.prepareNodeConfig(p, modes, ps.LanProxy, ps.IPv6, n, ports, ss.FakeIP); err != nil {
 			return err
 		}
 
@@ -401,7 +406,7 @@ func (m *Manager) Start(p StartParams) error {
 		if err != nil {
 			return fmt.Errorf("parse subscription node: %w", err)
 		}
-		if err := m.prepareNodeConfig(p, modes, ps.LanProxy, ps.IPv6, n, ports); err != nil {
+		if err := m.prepareNodeConfig(p, modes, ps.LanProxy, ps.IPv6, n, ports, ss.FakeIP); err != nil {
 			return err
 		}
 
@@ -442,7 +447,7 @@ func (m *Manager) Start(p StartParams) error {
 		TProxy:   ports.TProxy,
 		Redirect: ports.Redirect,
 	}
-	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, ss.Inbound.TunInterface, m.dataDir, gid, ipf); err != nil {
+	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, ss.Inbound.TunInterface, m.dataDir, gid, ipf, ss.FakeIP); err != nil {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
@@ -693,8 +698,8 @@ func (m *Manager) prepareUploadConfig(p StartParams) error {
 	return copyFile(srcPath, m.RunConfigPath())
 }
 
-func (m *Manager) prepareNodeConfig(p StartParams, modes config.ProxyModes, lanProxy bool, ipv6 bool, n *node.Node, ports builder.Ports) error {
-	data, err := builder.BuildConfig(p.RouteMode, n, ports, lanProxy, ipv6, m.srsDir, IsReF1ndBuild(), p.BlockAds)
+func (m *Manager) prepareNodeConfig(p StartParams, modes config.ProxyModes, lanProxy bool, ipv6 bool, n *node.Node, ports builder.Ports, fakeip bool) error {
+	data, err := builder.BuildConfig(p.RouteMode, n, ports, lanProxy, ipv6, m.srsDir, IsReF1ndBuild(), p.BlockAds, fakeip)
 	if err != nil {
 		return fmt.Errorf("build config: %w", err)
 	}

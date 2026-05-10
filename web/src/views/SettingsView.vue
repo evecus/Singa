@@ -235,6 +235,11 @@
             <span>绕过中国大陆流量</span>
             <span class="field-hint" style="margin:0">（直连中国大陆 IP，不经过 sing-box 核心）</span>
           </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:13px">
+            <div class="toggle" :class="{ on: fakeIP }" @click="fakeIP=!fakeIP"></div>
+            <span>FakeIP DNS 模式</span>
+            <span class="field-hint" style="margin:0">（将 198.18.0.0/15 / fc00::/18 流量引导至代理；单节点模式自动注入 DNS 配置，上传配置文件模式需自行配置）</span>
+          </label>
         </div>
         <div class="section-divider"></div>
 
@@ -428,6 +433,7 @@ const udpMode  = ref('tproxy')
 const lanProxy = ref(false)
 const ipv6     = ref(false)
 const bypassCN = ref(false)
+const fakeIP   = ref(false)
 
 const tcpModeOpts = [
   { v: 'redir',  l: 'redir',  desc: 'iptables REDIRECT（旧方案）' },
@@ -450,6 +456,16 @@ const proxyModeMsg = ref('')
 async function saveProxyConfig() {
   await saveProxyMode()
   await saveIPFilter()
+  await saveFakeIP()
+}
+
+async function saveFakeIP() {
+  try {
+    const current = await api('GET', '/singa-settings')
+    await api('POST', '/singa-settings', { ...current, fakeip: fakeIP.value })
+  } catch (e) {
+    proxyModeMsg.value = '✕ FakeIP 保存失败: ' + e.message
+  }
 }
 
 async function saveProxyMode() {
@@ -552,6 +568,7 @@ async function loadSingaSettings() {
       logCfg.value.disabled = r.log.disabled !== false
       logCfg.value.level    = r.log.level || 'warn'
     }
+    fakeIP.value = !!r.fakeip
   } catch {}
 }
 
@@ -582,6 +599,7 @@ async function saveSingaSettings() {
         disabled: logCfg.value.disabled,
         level:    logCfg.value.level,
       },
+      fakeip: fakeIP.value,
     })
     singaMsg.value = '✓ 已保存'
   } catch (e) {
@@ -719,7 +737,7 @@ async function saveWorkDir() {
 onMounted(() => {
   checkVersion()
   loadIPFilter()
-  loadSingaSettings()
+  loadSingaSettings()  // already loads fakeIP
   loadAuth()
   loadSched()
   loadWorkDir()

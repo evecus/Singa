@@ -14,6 +14,11 @@ type SingaSettings struct {
 	// Custom sing-box working directory for "run -D <path>".
 	// Empty = use default runDir.
 	SingboxWorkDir string `json:"singboxWorkDir"`
+	// FakeIP enables FakeIP DNS mode. When true:
+	//   - node mode: injects a fakeip DNS server and adjusts routing rules
+	//   - all modes: nft rules exempt 198.18.0.0/15 and fc00::/18 from bypass
+	//   - cache store_fakeip is forced on
+	FakeIP bool `json:"fakeip"`
 }
 
 // AuthSettings controls login authentication for the web UI.
@@ -46,6 +51,7 @@ type InboundSettings struct {
 type ExperimentalSettings struct {
 	CacheEnabled bool   `json:"cacheEnabled"` // default true
 	CachePath    string `json:"cachePath"`    // default "cache.db"
+	StoreFakeIP  bool   `json:"storeFakeIP"`  // store fakeip mappings in cache
 
 	ClashAPIEnabled  bool   `json:"clashAPIEnabled"`  // default true
 	ClashAPIListen   string `json:"clashAPIListen"`   // e.g. "0.0.0.0:9090"

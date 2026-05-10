@@ -178,10 +178,14 @@ func buildExperimental(e ExperimentalSettings) jsonMap {
 	exp := jsonMap{}
 
 	if e.CacheEnabled {
-		exp["cache_file"] = jsonMap{
+		cacheFile := jsonMap{
 			"enabled": true,
 			"path":    e.CachePath,
 		}
+		if e.StoreFakeIP {
+			cacheFile["store_fakeip"] = true
+		}
+		exp["cache_file"] = cacheFile
 	}
 
 	if e.ClashAPIEnabled && e.ClashAPIListen != "" {

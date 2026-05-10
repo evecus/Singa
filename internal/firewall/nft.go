@@ -28,26 +28,41 @@ const (
 )
 
 // privateRangesV4 covers fib-type addresses and all RFC-reserved IPv4 ranges.
-// Used identically in proxy_rule and tcp_redirect so the two chains are consistent.
-const privateRangesV4 = "" +
-	"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
-	"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, " +
-	"169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, " +
-	"192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
+// When fakeip is true, 198.18.0.0/15 is exempted so fakeip traffic reaches
+// the proxy instead of being short-circuited.
+func privateRangesV4(fakeip bool) string {
+	if fakeip {
+		return "" +
+			"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
+			"        ip daddr != 198.18.0.0/15 ip daddr { 0.0.0.0/8, 10.0.0.0/8, " +
+			"100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, " +
+			"192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, " +
+			"198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
+	}
+	return "" +
+		"        fib daddr type { local, broadcast, anycast, multicast } return\n" +
+		"        ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, " +
+		"169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, " +
+		"192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 } return\n"
+}
 
 // privateRangesV6 covers all RFC-reserved IPv6 ranges.
-// Used in proxy_rule (IPv6 traffic) and tcp_redirect (when IPv6 is enabled).
-const privateRangesV6 = "" +
-	"        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
+// When fakeip is true, fc00::/18 is exempted (it is the fakeip IPv6 range).
+func privateRangesV6(fakeip bool) string {
+	if fakeip {
+		return "        ip6 daddr != fc00::/18 ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
+	}
+	return "        ip6 daddr { ::/127, fc00::/7, fe80::/10, ff00::/8 } return\n"
+}
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) error {
-	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf)
+func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeip bool) error {
+	conf := buildTable(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeip)
 	if err := os.WriteFile(nftConfPath, []byte(conf), 0644); err != nil {
 		return fmt.Errorf("write nft conf: %w", err)
 	}
-	if err := setupRoutes(modes, ipv6, tunDevice); err != nil {
+	if err := setupRoutes(modes, ipv6, tunDevice, fakeip); err != nil {
 		return err
 	}
 	if lanProxy {
@@ -87,14 +102,14 @@ func setup(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 
 // setupRoutes installs ip rule / ip route entries for the active modes.
 // Only installs routes for modes that are actually in use.
-func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string) error {
+func setupRoutes(modes config.ProxyModes, ipv6 bool, tunDevice string, fakeip bool) error {
 	if modes.NeedsTProxyInbound() {
 		if err := setupTProxyRoutes(ipv6); err != nil {
 			return err
 		}
 	}
 	if modes.NeedsTunInbound() {
-		if err := setupTunRoutes(ipv6, tunDevice); err != nil {
+		if err := setupTunRoutes(ipv6, tunDevice, fakeip); err != nil {
 			return err
 		}
 	}
@@ -120,16 +135,26 @@ func setupTProxyRoutes(ipv6 bool) error {
 	return nil
 }
 
-func setupTunRoutes(ipv6 bool, tunDevice string) error {
+func setupTunRoutes(ipv6 bool, tunDevice string, fakeip bool) error {
 	cmds := []string{
 		fmt.Sprintf("ip rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
 		fmt.Sprintf("ip route add default dev %s table %d", tunDevice, tunTable),
+	}
+	if fakeip {
+		cmds = append(cmds,
+			fmt.Sprintf("ip route add 198.18.0.0/15 dev %s", tunDevice),
+		)
 	}
 	if ipv6 {
 		cmds = append(cmds,
 			fmt.Sprintf("ip -6 rule add fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
 			fmt.Sprintf("ip -6 route add default dev %s table %d", tunDevice, tunTable),
 		)
+		if fakeip {
+			cmds = append(cmds,
+				fmt.Sprintf("ip -6 route add fc00::/18 dev %s", tunDevice),
+			)
+		}
 	}
 	for _, c := range cmds {
 		if err := runCmd(c); err != nil {
@@ -195,7 +220,7 @@ func buildIPFilterNft(ipf ipfilter.Config, lanProxy bool) (setDef string, ruleSn
 
 // ── Main table builder ─────────────────────────────────────────────────────
 
-func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config) string {
+func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, gid uint32, ipf ipfilter.Config, fakeip bool) string {
 	ipfSetDef, ipfRule := buildIPFilterNft(ipf, lanProxy)
 	var s strings.Builder
 
@@ -237,7 +262,7 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
 `, tunFwMark))
 	}
 
-	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN))
+	s.WriteString(buildProxyRuleChain(modes, ipfRule, ipv6, bypassCN, fakeip))
 	s.WriteString(buildManglePrerouting(modes, ports, lanProxy, ipv6, tunDevice))
 	s.WriteString(buildMangleOutput(modes, ipv6, gid))
 
@@ -253,14 +278,14 @@ func buildTable(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, 
     }
 `)
 
-	s.WriteString(buildNATChains(modes, ports, ipv6, gid))
+	s.WriteString(buildNATChains(modes, ports, ipv6, gid, fakeip))
 	s.WriteString("}\n")
 	return s.String()
 }
 
 // ── proxy_rule chain ───────────────────────────────────────────────────────
 
-func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, bypassCN bool) string {
+func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, bypassCN bool, fakeip bool) string {
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_rule {\n")
 
@@ -273,9 +298,9 @@ func buildProxyRuleChain(modes config.ProxyModes, ipfRule string, ipv6 bool, byp
 		s.WriteString(fmt.Sprintf("        meta mark & %s == %s return\n", tunFwMask, tunFwMark))
 	}
 
-	s.WriteString(privateRangesV4)
+	s.WriteString(privateRangesV4(fakeip))
 	if ipv6 {
-		s.WriteString(privateRangesV6)
+		s.WriteString(privateRangesV6(fakeip))
 	}
 	s.WriteString("        ip daddr @interface return\n")
 	if ipv6 {
@@ -366,7 +391,7 @@ func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32) string {
 
 // ── NAT chains ─────────────────────────────────────────────────────────────
 
-func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32) string {
+func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32, fakeip bool) string {
 	var s strings.Builder
 
 	dnsV4 := fmt.Sprintf("        ip daddr != 127.0.0.1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
@@ -382,16 +407,13 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 `, gid, ports.DNS, dnsV4, dnsV6))
 
 	if modes.TCP == config.TCPModeRedir {
-		// tcp_redirect uses the shared privateRangesV4 constant so it stays in
-		// sync with proxy_rule.  When IPv6 is enabled, privateRangesV6 is also
-		// added so we don't accidentally redirect link-local / ULA TCP traffic.
 		nfproto := "meta nfproto ipv4"
 		if ipv6 {
 			nfproto = "meta nfproto { ipv4, ipv6 }"
 		}
 		ipv6Ranges := ""
 		if ipv6 {
-			ipv6Ranges = privateRangesV6
+			ipv6Ranges = privateRangesV6(fakeip)
 		}
 		s.WriteString(fmt.Sprintf(`
     chain tcp_redirect {
@@ -399,7 +421,7 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32)
 %s%s        ip daddr @interface return
         %s meta l4proto tcp redirect to :%d
     }
-`, gid, privateRangesV4, ipv6Ranges, nfproto, ports.Redirect))
+`, gid, privateRangesV4(fakeip), ipv6Ranges, nfproto, ports.Redirect))
 	}
 
 	s.WriteString("\n    chain prerouting_nat {\n")
@@ -464,11 +486,14 @@ func cleanupTunRoutes(ipv6 bool, tunDevice string) {
 	cmds := []string{
 		fmt.Sprintf("ip rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
 		fmt.Sprintf("ip route del default dev %s table %d", tunDevice, tunTable),
+		// Always attempt to remove fakeip routes (harmless if not present)
+		fmt.Sprintf("ip route del 198.18.0.0/15 dev %s", tunDevice),
 	}
 	if ipv6 {
 		cmds = append(cmds,
 			fmt.Sprintf("ip -6 rule del fwmark %s/%s table %d", tunFwMark, tunFwMask, tunTable),
 			fmt.Sprintf("ip -6 route del default dev %s table %d", tunDevice, tunTable),
+			fmt.Sprintf("ip -6 route del fc00::/18 dev %s", tunDevice),
 		)
 	}
 	for _, c := range cmds {

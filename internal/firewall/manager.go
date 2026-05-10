@@ -23,6 +23,9 @@ var activeModes config.ProxyModes
 // activeIPv6 remembers whether IPv6 routes were installed.
 var activeIPv6 bool
 
+// activeFakeIP remembers whether fakeip was enabled (for cleanup).
+var activeFakeIP bool
+
 // Ports holds the listen ports that nftables needs to know about.
 type Ports struct {
 	DNS      int
@@ -33,7 +36,7 @@ type Ports struct {
 // Apply sets up nftables rules for the chosen TCP/UDP proxy modes.
 // tunDevice is the TUN interface name configured by the user (e.g. "singa",
 // "tun0"). It is used in both the nft iifname match and the ip route rules.
-func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config) error {
+func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, ipf ipfilter.Config, fakeip bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -46,13 +49,14 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 	activeTunDevice = tunDevice
 	activeModes = modes
 	activeIPv6 = ipv6
+	activeFakeIP = fakeip
 
 	if modes.IsSystemProxyOnly() {
 		log.Println("firewall: system_proxy only — no nftables rules")
 		return nil
 	}
 
-	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf); err != nil {
+	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, ipf, fakeip); err != nil {
 		return fmt.Errorf("nft setup: %w", err)
 	}
 
@@ -68,7 +72,7 @@ func ApplyTunRoutes(ipv6 bool) {
 	if activeTunDevice == "" {
 		return
 	}
-	setupTunRoutes(ipv6, activeTunDevice)
+	setupTunRoutes(ipv6, activeTunDevice, activeFakeIP)
 }
 
 // Stop tears down nftables rules and ip routes for the last active modes.
@@ -79,4 +83,5 @@ func Stop() {
 	activeTunDevice = ""
 	activeModes = config.ProxyModes{}
 	activeIPv6 = false
+	activeFakeIP = false
 }
