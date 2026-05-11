@@ -1325,16 +1325,95 @@ async function save() {
         )
         if (!proceed) { saving.value = false; return }
 
-        // Auto-fix: remove invalid outbound references reported by validation.
-        // Error location format: "outbound[N](tag).outbounds[M]"
-        // Iterate in reverse so splice indices stay valid.
-        const toFix = vRes.errors
-          .map(e => e.location.match(/^outbound\[(\d+)\][^.]*\.outbounds\[(\d+)\]/))
-          .filter(Boolean)
-          .map(m => ({ ob: parseInt(m[1]), ref: parseInt(m[2]) }))
-          .sort((a, b) => b.ref - a.ref)  // descending ref index
-        for (const { ob, ref } of toFix) {
-          wizardConfig.outbounds[ob]?.outbounds?.splice(ref, 1)
+        // Auto-fix: clear invalid references reported by validation.
+        for (const err of vRes.errors) {
+          const loc = err.location
+
+          // outbound[N](tag).outbounds[M] — invalid outbound ref inside selector/urltest
+          // Handled below in a separate reverse-order pass to keep splice indices stable.
+          if (loc.match(/^outbound\[(\d+)\][^.]*\.outbounds\[(\d+)\]/)) continue
+
+          // route.final — clear invalid final outbound
+          if (loc === 'route.final') {
+            wizardConfig.route.final = ''
+            continue
+          }
+
+          // route.default_domain_resolver — clear invalid dns resolver
+          if (loc === 'route.default_domain_resolver') {
+            wizardConfig.route.default_domain_resolver = ''
+            continue
+          }
+
+          // route.rule_set[N](tag).download_detour — clear invalid detour
+          const rsDetour = loc.match(/^route\.rule_set\[(\d+)\][^.]*\.download_detour$/)
+          if (rsDetour) {
+            const i = parseInt(rsDetour[1])
+            if (wizardConfig.route.rule_set[i]) wizardConfig.route.rule_set[i].download_detour = ''
+            continue
+          }
+
+          // route.rules[N].outbound — clear invalid outbound
+          const routeRuleOb = loc.match(/^route\.rules\[(\d+)\]\.outbound$/)
+          if (routeRuleOb) {
+            const i = parseInt(routeRuleOb[1])
+            if (wizardConfig.route.rules[i]) wizardConfig.route.rules[i].outbound = ''
+            continue
+          }
+
+          // route.rules[N].server — clear invalid dns server ref in route rule
+          const routeRuleSrv = loc.match(/^route\.rules\[(\d+)\]\.server$/)
+          if (routeRuleSrv) {
+            const i = parseInt(routeRuleSrv[1])
+            if (wizardConfig.route.rules[i]) wizardConfig.route.rules[i].server = ''
+            continue
+          }
+
+          // dns.final — clear invalid final dns server
+          if (loc === 'dns.final') {
+            wizardConfig.dns.final = ''
+            continue
+          }
+
+          // dns.servers[N](tag).domain_resolver — clear invalid resolver ref
+          const dnsSrvResolver = loc.match(/^dns\.servers\[(\d+)\][^.]*\.domain_resolver$/)
+          if (dnsSrvResolver) {
+            const i = parseInt(dnsSrvResolver[1])
+            if (wizardConfig.dns.servers[i]) wizardConfig.dns.servers[i].domain_resolver = ''
+            continue
+          }
+
+          // dns.servers[N](tag).detour — clear invalid detour on dns server
+          const dnsSrvDetour = loc.match(/^dns\.servers\[(\d+)\][^.]*\.detour$/)
+          if (dnsSrvDetour) {
+            const i = parseInt(dnsSrvDetour[1])
+            if (wizardConfig.dns.servers[i]) wizardConfig.dns.servers[i].detour = ''
+            continue
+          }
+
+          // dns.rules[N].server — clear invalid dns server ref in dns rule
+          const dnsRuleSrv = loc.match(/^dns\.rules\[(\d+)\]\.server$/)
+          if (dnsRuleSrv) {
+            const i = parseInt(dnsRuleSrv[1])
+            if (wizardConfig.dns.rules[i]) wizardConfig.dns.rules[i].server = ''
+            continue
+          }
+        }
+
+        // outbound[N].outbounds[M]: splice in reverse order per outbound to keep indices stable
+        const obSplices = {}
+        for (const err of vRes.errors) {
+          const m = err.location.match(/^outbound\[(\d+)\][^.]*\.outbounds\[(\d+)\]/)
+          if (!m) continue
+          const ob = parseInt(m[1]), ref = parseInt(m[2])
+          if (!obSplices[ob]) obSplices[ob] = []
+          obSplices[ob].push(ref)
+        }
+        for (const ob in obSplices) {
+          const refs = obSplices[ob].sort((a, b) => b - a)  // descending
+          for (const ref of refs) {
+            wizardConfig.outbounds[ob]?.outbounds?.splice(ref, 1)
+          }
         }
       }
     } catch {}
