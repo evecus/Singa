@@ -54,6 +54,7 @@
                 <span class="ob-hint">
                   (引用出站:{{ countOutbounds(ob) }} / 引用订阅:{{ countSubs(ob) }})
                 </span>
+                <span v-if="hasInvalidRefs(ob)" title="存在无效引用" style="color:var(--red);font-size:13px;margin-left:4px">⚠</span>
                 <div style="margin-left:auto;display:flex;gap:4px">
                   <button class="btn-icon" @click="openSortModal(idx)" title="排序引用">⇅</button>
                   <button class="btn-icon" @click="openOutboundEdit(idx)" title="编辑">✎</button>
@@ -161,7 +162,7 @@
                   <span class="rule-type">{{ rule.type }}</span>
                   <span class="rule-payload">{{ renderRouteRulePayload(rule) }}</span>
                   <span class="rule-act" :class="'ra-' + rule.action">{{ rule.action }}</span>
-                  <span v-if="rule.outbound" class="rule-out">
+                  <span v-if="rule.outbound" class="rule-out" :class="{ 'ref-invalid': !isValidOutbound(rule.outbound) }">
                     → {{ outboundLabel(rule.outbound) }}
                   </span>
                   <div style="margin-left:auto;display:flex;gap:3px;flex-shrink:0" @click.stop>
@@ -233,6 +234,7 @@
                   <span class="drag-handle" style="cursor:move;color:var(--text3)">⠿</span>
                   <span class="dns-tag">{{ srv.tag }}</span>
                   <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6;font-family:var(--mono);font-weight:700;margin-left:4px">{{ srv.type }}</span>
+                  <span v-if="dnsServerHasInvalidRefs(srv)" title="存在无效引用" style="color:var(--red);font-size:13px;margin-left:4px">⚠</span>
                   <div style="font-size:11px;color:var(--text3);font-family:var(--mono);flex:1;margin-left:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                     {{ dnsServerSummary(srv) }}
                   </div>
@@ -271,7 +273,7 @@
                   <span class="rule-type">{{ rule.type }}</span>
                   <span class="rule-payload">{{ renderDnsRulePayload(rule) }}</span>
                   <span class="rule-act ra-route">route</span>
-                  <span v-if="rule.server" class="rule-out">→ {{ dnsServerTagById(rule.server) }}</span>
+                  <span v-if="rule.server" class="rule-out" :class="{ 'ref-invalid': !isValidDnsSrv(rule.server) }">→ {{ dnsServerTagById(rule.server) }}</span>
                   <div style="margin-left:auto;display:flex;gap:3px;flex-shrink:0" @click.stop>
                     <button class="btn-icon" @click="openDnsRuleEdit(idx)">✎</button>
                     <button class="btn-icon danger" @click="form.dns.rules.splice(idx,1)">✕</button>
@@ -375,10 +377,10 @@
             </div>
             <div v-show="expandedGroups.has('builtin')" class="ob-ref-grid">
               <button v-for="ob in allProxies" :key="ob.id"
-                class="ob-ref-item" :class="{ on: isInRefs(ob.id) }"
+                class="ob-ref-item" :class="{ on: isInRefs(ob.id), 'ob-ref-deleted': ob.deleted }"
                 @click="toggleRef(ob.id, ob.tag)">
                 <span style="font-size:11px;font-weight:700">{{ ob.tag }}</span>
-                <span class="text-xs text-muted">{{ ob.type }}</span>
+                <span class="text-xs text-muted">{{ ob.deleted ? '已删除 ⚠' : ob.type }}</span>
               </button>
             </div>
           </div>
@@ -579,6 +581,7 @@
           <select class="select" v-model="rrFields.outbound">
             <option value="">— 选择出站 —</option>
             <option v-for="ob in allOutboundOptions" :key="ob.v" :value="ob.v">{{ ob.l }}</option>
+            <option v-if="rrFields.outbound && !isValidOutbound(rrFields.outbound)" :value="rrFields.outbound" style="color:var(--red)">⚠ {{ rrFields.outbound }}（已删除）</option>
           </select>
         </div>
         <div v-if="rrFields.action==='sniff'" class="wfield">
@@ -601,6 +604,12 @@
               @click="toggleRulesetInRule(rs.id, rrFields)">
               <span style="font-size:11px;font-weight:700">{{ rs.tag }}</span>
               <span class="text-xs text-muted">{{ rs.type }} {{ rs.format }}</span>
+            </button>
+            <button v-for="rs in orphanRulesetsInPayload(rrFields.payload)" :key="rs.id"
+              class="ob-ref-item ob-ref-deleted" :class="{ on: rrRulesetSelected(rs.id) }"
+              @click="toggleRulesetInRule(rs.id, rrFields)">
+              <span style="font-size:11px;font-weight:700">{{ rs.tag }}</span>
+              <span class="text-xs text-muted">已删除 ⚠</span>
             </button>
           </div>
         </template>
@@ -647,13 +656,15 @@
             <select class="select" v-model="dnsSrvFields.domain_resolver">
               <option value="">不设置</option>
               <option v-for="s in form.dns.servers.filter(x=>x.id!==dnsSrvFields.id)" :key="s.id" :value="s.id">{{ s.tag }} ({{ s.type }})</option>
+              <option v-if="dnsSrvFields.domain_resolver && !isValidDnsSrv(dnsSrvFields.domain_resolver)" :value="dnsSrvFields.domain_resolver" style="color:var(--red)">⚠ {{ dnsSrvFields.domain_resolver }}（已删除）</option>
             </select>
           </div>
           <div class="wfield">
             <div class="wlabel">出站节点（detour）</div>
             <select class="select" v-model="dnsSrvFields.detour">
               <option value="">不设置</option>
-              <option v-for="ob in allProxies" :key="ob.id" :value="ob.id">{{ ob.tag }}</option>
+              <option v-for="ob in allProxies" :key="ob.id" :value="ob.id"
+                :style="ob.deleted ? 'color:var(--red)' : ''">{{ ob.deleted ? '⚠ ' + ob.tag + '（已删除）' : ob.tag }}</option>
             </select>
           </div>
         </template>
@@ -713,6 +724,7 @@
           <select class="select" v-model="drFields.server">
             <option value="">— 选择服务器 —</option>
             <option v-for="s in form.dns.servers" :key="s.id" :value="s.id">{{ s.tag }} ({{ s.type }})</option>
+            <option v-if="drFields.server && !isValidDnsSrv(drFields.server)" :value="drFields.server" style="color:var(--red)">⚠ {{ drFields.server }}（已删除）</option>
           </select>
         </div>
         <template v-if="drFields.type==='rule_set'">
@@ -724,6 +736,12 @@
               @click="toggleRulesetInRule(rs.id, drFields)">
               <span style="font-size:11px;font-weight:700">{{ rs.tag }}</span>
               <span class="text-xs text-muted">{{ rs.type }}</span>
+            </button>
+            <button v-for="rs in orphanRulesetsInPayload(drFields.payload)" :key="rs.id"
+              class="ob-ref-item ob-ref-deleted" :class="{ on: drRulesetSelected(rs.id) }"
+              @click="toggleRulesetInRule(rs.id, drFields)">
+              <span style="font-size:11px;font-weight:700">{{ rs.tag }}</span>
+              <span class="text-xs text-muted">已删除 ⚠</span>
             </button>
           </div>
         </template>
@@ -1095,11 +1113,37 @@ function countSubs(ob) {
   if (!['selector','urltest'].includes(ob.type)) return 0
   return (ob.outbounds||[]).filter(r => r.type === 'Subscription').length
 }
+function hasInvalidRefs(ob) {
+  if (!['selector','urltest'].includes(ob.type)) return false
+  const validIds = new Set([
+    ...BUILTIN_OUTBOUNDS.map(o => o.id),
+    ...form.outbounds.map(o => o.id),
+    ...nodesStore.nodes.map(n => n.id),
+    ...subsStore.subs.map(s => s.id),
+  ])
+  return (ob.outbounds||[]).some(r =>
+    r.type !== 'Subscription' && r.type !== 'Subscribe' && !validIds.has(r.id)
+  )
+}
 
-const allProxies = computed(() => [
-  ...BUILTIN_OUTBOUNDS,
-  ...form.outbounds.filter(ob => ob.id !== obFields.id).map(ob => ({ id:ob.id, tag:ob.tag, type:ob.type })),
-])
+const allProxies = computed(() => {
+  const existing = new Set([
+    ...BUILTIN_OUTBOUNDS.map(o => o.id),
+    ...form.outbounds.map(o => o.id),
+    ...nodesStore.nodes.map(n => n.id),
+    ...subsStore.subs.map(s => s.id),
+  ])
+  // Orphaned refs: currently referenced but no longer exist anywhere
+  const orphans = (obFields.outbounds || []).filter(r =>
+    r.type !== 'Subscription' && r.type !== 'Subscribe' &&
+    !existing.has(r.id)
+  ).map(r => ({ id: r.id, tag: r.tag, type: r.type, deleted: true }))
+  return [
+    ...BUILTIN_OUTBOUNDS,
+    ...form.outbounds.filter(ob => ob.id !== obFields.id).map(ob => ({ id:ob.id, tag:ob.tag, type:ob.type })),
+    ...orphans,
+  ]
+})
 function isInRefs(id) { return obFields.outbounds.some(r => r.id === id) }
 function toggleRef(id, tag, type='Built-in') {
   const idx = obFields.outbounds.findIndex(r => r.id === id)
@@ -1263,14 +1307,37 @@ const allOutboundOptions = computed(() => [
   { v:'direct', l:'direct' }, { v:'block', l:'block' },
 ])
 
+// ── Invalid-ref helpers ────────────────────────────────────────────────────
+const validObIds = computed(() => new Set([
+  ...form.outbounds.map(o => o.id), 'direct', 'block',
+]))
+const validDnsSrvIds = computed(() => new Set(form.dns.servers.map(s => s.id)))
+const validRsIds = computed(() => new Set(form.route.rule_set.map(r => r.id)))
+
+function isValidOutbound(id) { return !id || validObIds.value.has(id) }
+function isValidDnsSrv(id)   { return !id || validDnsSrvIds.value.has(id) }
+
+function dnsServerHasInvalidRefs(srv) {
+  return (srv.detour && !isValidOutbound(srv.detour)) ||
+         (srv.domain_resolver && !isValidDnsSrv(srv.domain_resolver))
+}
+
+// Returns ruleset stubs for IDs in a comma-separated payload that no longer exist
+function orphanRulesetsInPayload(payload) {
+  if (!payload) return []
+  return payload.split(',').filter(Boolean)
+    .filter(id => !validRsIds.value.has(id))
+    .map(id => ({ id, tag: id }))
+}
+
 function outboundLabel(id) {
+  if (id === 'direct' || id === 'block') return id
   const ob = form.outbounds.find(o => o.id === id)
-  if (ob) return ob.tag
-  return id
+  return ob ? ob.tag : `⚠ ${id}（已删除）`
 }
 function dnsServerTagById(id) {
   const s = form.dns.servers.find(s => s.id === id)
-  return s ? s.tag : id
+  return s ? s.tag : `⚠ ${id}（已删除）`
 }
 function dnsServerSummary(srv) {
   if (srv.type === 'fakeip') return `${srv.inet4_range} / ${srv.inet6_range}`
@@ -1449,4 +1516,7 @@ async function save() {
 }
 .ob-ref-item:hover { border-color:var(--border2); background:var(--surface); }
 .ob-ref-item.on { border-color:var(--accent); background:var(--accent-bg); }
+.ob-ref-item.ob-ref-deleted { opacity:.55; border-color:var(--red); }
+.ob-ref-item.ob-ref-deleted.on { border-color:var(--red); background:color-mix(in srgb, var(--red) 12%, transparent); }
+.ref-invalid { color:var(--red) !important; }
 </style>
