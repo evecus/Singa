@@ -1318,13 +1318,24 @@ async function save() {
       const vRes = await api('POST', '/profiles/validate', { wizardConfig })
       if (!vRes.ok && vRes.errors?.length) {
         saveErrors.value = vRes.errors
-        // Ask user if they want to save anyway
         const proceed = confirm(
           `⚠ 配置验证发现以下错误：\n\n` +
           vRes.errors.map(e => `• [${e.location}] ${e.message}`).join('\n') +
           `\n\n是否仍然保存？（建议修正后再保存）`
         )
         if (!proceed) { saving.value = false; return }
+
+        // Auto-fix: remove invalid outbound references reported by validation.
+        // Error location format: "outbound[N](tag).outbounds[M]"
+        // Iterate in reverse so splice indices stay valid.
+        const toFix = vRes.errors
+          .map(e => e.location.match(/^outbound\[(\d+)\][^.]*\.outbounds\[(\d+)\]/))
+          .filter(Boolean)
+          .map(m => ({ ob: parseInt(m[1]), ref: parseInt(m[2]) }))
+          .sort((a, b) => b.ref - a.ref)  // descending ref index
+        for (const { ob, ref } of toFix) {
+          wizardConfig.outbounds[ob]?.outbounds?.splice(ref, 1)
+        }
       }
     } catch {}
 
