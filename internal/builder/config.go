@@ -89,13 +89,21 @@ func buildDNS(routeMode RouteMode, ipv6 bool, fakeip bool) M {
 			"action":   "route",
 			"server":   "direct-dns",
 		})
+		// fakeip cannot be the default (final) server; route A/AAAA queries to
+		// fakeip-dns explicitly and fall back to remote-dns for everything else.
 		if fakeip {
-			finalDNS = "fakeip-dns"
-		} else {
-			finalDNS = "remote-dns"
+			rules = append(rules, M{
+				"query_type": []string{"A", "AAAA"},
+				"action":     "route",
+				"server":     "fakeip-dns",
+				"strategy":   strategy,
+			})
 		}
+		finalDNS = "remote-dns"
 
 	case RouteModeGFWList:
+		// final="direct-dns", so fakeip is never the default server here.
+		// Route GFW-listed domains to remote-dns (or fakeip-dns when enabled).
 		target := "remote-dns"
 		if fakeip {
 			target = "fakeip-dns"
@@ -108,11 +116,16 @@ func buildDNS(routeMode RouteMode, ipv6 bool, fakeip bool) M {
 		finalDNS = "direct-dns"
 
 	case RouteModeGlobal:
+		// fakeip cannot be the default server either.
 		if fakeip {
-			finalDNS = "fakeip-dns"
-		} else {
-			finalDNS = "remote-dns"
+			rules = append(rules, M{
+				"query_type": []string{"A", "AAAA"},
+				"action":     "route",
+				"server":     "fakeip-dns",
+				"strategy":   strategy,
+			})
 		}
+		finalDNS = "remote-dns"
 	}
 
 	dns := M{
