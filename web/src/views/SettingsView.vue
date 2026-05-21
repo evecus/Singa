@@ -241,19 +241,17 @@
             <span class="field-hint" style="margin:0">（将 198.18.0.0/15 / fc00::/18 流量引导至代理；单节点模式自动注入 DNS 配置，上传配置文件模式需自行配置）</span>
           </label>
           <!-- Extra GID bypass -->
-          <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-            <span style="font-size:13px;white-space:nowrap">防火墙绕过 GID</span>
+          <div style="display:flex;align-items:flex-start;gap:8px;margin-top:4px">
+            <span style="font-size:13px;white-space:nowrap;line-height:30px">防火墙绕过 GID</span>
             <input
               v-model="extraGIDRaw"
-              @input="onExtraGIDInput"
               @blur="onExtraGIDBlur"
-              placeholder="xx xx xxx"
-              maxlength="9"
-              style="width:90px;font-size:13px;font-family:monospace;letter-spacing:1px;padding:3px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);outline:none"
+              placeholder="例：1000 1001 65534"
+              style="flex:1;min-width:200px;font-size:13px;font-family:monospace;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);outline:none"
               :style="extraGIDError ? 'border-color:var(--red,#e05)' : ''"
             />
-            <span v-if="extraGIDError" style="font-size:11px;color:var(--red,#e05)">{{ extraGIDError }}</span>
-            <span v-else class="field-hint" style="margin:0">格式：xx xx xxx（此 GID 的流量将绕过代理直连）</span>
+            <span v-if="extraGIDError" style="font-size:11px;color:var(--red,#e05);line-height:30px">{{ extraGIDError }}</span>
+            <span v-else class="field-hint" style="margin:0;line-height:30px">多个 GID 用空格分隔，这些 GID 的流量将绕过代理直连</span>
           </div>
         </div>
         <div class="section-divider"></div>
@@ -450,45 +448,37 @@ const ipv6     = ref(false)
 const bypassCN = ref(false)
 const fakeIP   = ref(false)
 
-// Extra GID bypass field — stored as numeric uint32, displayed as "xx xx xxx"
-const extraGIDRaw   = ref('')   // display string e.g. "12 34 567"
-const extraGIDValue = ref(0)    // parsed uint32 (0 = disabled)
+// Extra GID bypass — space-separated list of numeric GIDs, e.g. "1000 1001 65534"
+const extraGIDRaw   = ref('')   // raw input string
 const extraGIDError = ref('')
 
-/** Format a numeric GID as "xx xx xxx" (2-2-3 groups, left-zero-padded to 7 digits) */
-function formatGID(n) {
-  if (!n) return ''
-  const s = String(n).padStart(7, '0')
-  return `${s.slice(0,2)} ${s.slice(2,4)} ${s.slice(4)}`
-}
-
-/** Parse "xx xx xxx" (or plain digits) to a Number; returns NaN on invalid */
-function parseGID(raw) {
-  const digits = raw.replace(/\s/g, '')
-  if (digits === '') return 0
-  if (!/^\d{1,7}$/.test(digits)) return NaN
-  return parseInt(digits, 10)
-}
-
-function onExtraGIDInput(e) {
-  // Keep only digits and spaces, auto-insert spaces at positions 2 and 5
-  let digits = e.target.value.replace(/\D/g, '').slice(0, 7)
-  let formatted = digits
-  if (digits.length > 4) formatted = digits.slice(0,2) + ' ' + digits.slice(2,4) + ' ' + digits.slice(4)
-  else if (digits.length > 2) formatted = digits.slice(0,2) + ' ' + digits.slice(2)
-  extraGIDRaw.value = formatted
-  extraGIDError.value = ''
+/** Parse space-separated GID string into array of uint32. Returns null on error. */
+function parseGIDs(raw) {
+  const parts = raw.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return []
+  const result = []
+  for (const p of parts) {
+    if (!/^\d+$/.test(p)) return null
+    const n = parseInt(p, 10)
+    if (n < 0 || n > 65535) return null
+    result.push(n)
+  }
+  return result
 }
 
 function onExtraGIDBlur() {
-  const n = parseGID(extraGIDRaw.value)
-  if (isNaN(n)) {
-    extraGIDError.value = '格式不正确'
+  if (extraGIDRaw.value.trim() === '') {
+    extraGIDError.value = ''
     return
   }
-  extraGIDValue.value = n
-  extraGIDRaw.value = n ? formatGID(n) : ''
+  const gids = parseGIDs(extraGIDRaw.value)
+  if (gids === null) {
+    extraGIDError.value = '只能输入数字（0-65535），多个用空格分隔'
+    return
+  }
   extraGIDError.value = ''
+  // Normalize: trim extra spaces
+  extraGIDRaw.value = gids.join(' ')
 }
 
 const tcpModeOpts = [
@@ -525,9 +515,10 @@ async function saveFakeIP() {
 }
 
 async function saveProxyMode() {
-  // Validate extraGID before saving
+  // Validate extraGIDs before saving
   onExtraGIDBlur()
   if (extraGIDError.value) return
+  const extraGIDs = parseGIDs(extraGIDRaw.value) || []
   try {
     await api('POST', '/proxy-settings', {
       systemProxy: systemProxy.value,
@@ -536,7 +527,7 @@ async function saveProxyMode() {
       lanProxy: lanProxy.value,
       ipv6:     ipv6.value,
       bypassCN: bypassCN.value,
-      extraGID: extraGIDValue.value,
+      extraGIDs: extraGIDs,
     })
     proxyModeMsg.value = '✓ 已保存'
   } catch (e) {
@@ -808,9 +799,8 @@ onMounted(() => {
     lanProxy.value = !!r.lanProxy
     ipv6.value     = !!r.ipv6
     bypassCN.value = !!r.bypassCN
-    const gid = r.extraGID || 0
-    extraGIDValue.value = gid
-    extraGIDRaw.value   = gid ? formatGID(gid) : ''
+    const gids = Array.isArray(r.extraGIDs) ? r.extraGIDs : (r.extraGID ? [r.extraGID] : [])
+    extraGIDRaw.value = gids.filter(Boolean).join(' ')
   }).catch(() => {})
 })
 </script>
