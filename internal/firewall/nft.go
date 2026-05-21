@@ -374,15 +374,31 @@ func buildManglePrerouting(modes config.ProxyModes, ports Ports, lanProxy bool, 
 	return s.String()
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+// skgidRule returns a single nftables rule that bypasses all given GIDs.
+// If there is only one GID it emits "meta skgid N return".
+// If there are multiple it emits "meta skgid { N, M, ... } return".
+func skgidRule(gid uint32, extraGIDs []uint32) string {
+	all := make([]uint32, 0, 1+len(extraGIDs))
+	all = append(all, gid)
+	all = append(all, extraGIDs...)
+	if len(all) == 1 {
+		return fmt.Sprintf("        meta skgid %d return\n", all[0])
+	}
+	parts := make([]string, len(all))
+	for i, g := range all {
+		parts[i] = fmt.Sprintf("%d", g)
+	}
+	return fmt.Sprintf("        meta skgid { %s } return\n", strings.Join(parts, ", "))
+}
+
 // ── Mangle output chain ────────────────────────────────────────────────────
 
 func buildMangleOutput(modes config.ProxyModes, ipv6 bool, gid uint32, extraGIDs []uint32) string {
 	var s strings.Builder
 	s.WriteString("\n    chain proxy_out {\n")
-	s.WriteString(fmt.Sprintf("        skgid %d return\n", gid))
-	for _, eg := range extraGIDs {
-		s.WriteString(fmt.Sprintf("        skgid %d return\n", eg))
-	}
+	s.WriteString(skgidRule(gid, extraGIDs))
 	nfproto := "meta nfproto ipv4"
 	if ipv6 {
 		nfproto = "meta nfproto { ipv4, ipv6 }"
@@ -402,16 +418,12 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32,
 	if ipv6 {
 		dnsV6 = fmt.Sprintf("        ip6 daddr != ::1 meta l4proto { tcp, udp } th dport 53 redirect to :%d\n", ports.DNS)
 	}
-	extraGIDLine := ""
-	for _, eg := range extraGIDs {
-		extraGIDLine += fmt.Sprintf("        skgid %d return\n", eg)
-	}
+	extraGIDLine := skgidRule(gid, extraGIDs)
 	s.WriteString(fmt.Sprintf(`
     chain dns_redirect {
-        skgid %d return
 %s        meta l4proto { tcp, udp } th dport %d return
 %s%s    }
-`, gid, extraGIDLine, ports.DNS, dnsV4, dnsV6))
+`, extraGIDLine, ports.DNS, dnsV4, dnsV6))
 
 	if modes.TCP == config.TCPModeRedir {
 		nfproto := "meta nfproto ipv4"
@@ -424,11 +436,10 @@ func buildNATChains(modes config.ProxyModes, ports Ports, ipv6 bool, gid uint32,
 		}
 		s.WriteString(fmt.Sprintf(`
     chain tcp_redirect {
-        skgid %d return
 %s%s%s        ip daddr @interface return
         %s meta l4proto tcp redirect to :%d
     }
-`, gid, extraGIDLine, privateRangesV4(fakeip), ipv6Ranges, nfproto, ports.Redirect))
+`, extraGIDLine, privateRangesV4(fakeip), ipv6Ranges, nfproto, ports.Redirect))
 	}
 
 	s.WriteString("\n    chain prerouting_nat {\n")
