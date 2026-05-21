@@ -120,18 +120,18 @@
           <div v-if="startErr" class="alert alert-error" style="margin-top:10px">{{ startErr }}</div>
         </div>
 
-        <!-- Right: Log card，flex 撑满与左侧等高 -->
+        <!-- Right: Log card -->
         <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
           <div class="card-title-row" style="padding:12px 14px 0;flex-shrink:0">
             <span class="card-title" style="margin:0">实时日志</span>
             <button class="btn btn-ghost btn-sm" @click="logsStore.clear()">清空</button>
           </div>
-          <div class="log-panel" style="flex:1;min-height:200px;border-radius:0;box-shadow:none;background:#0f1117">
+          <div class="log-panel" style="flex:1;border-radius:0;box-shadow:none;background:#0f1117;height:300px;min-height:300px;max-height:300px">
             <div class="log-toolbar">
               <div v-if="isRunning" class="log-dot"></div>
               <span class="log-label">{{ isRunning ? 'LIVE' : 'IDLE' }}</span>
             </div>
-            <div class="log-body" ref="logEl">
+            <div class="log-body" ref="logEl" style="height:calc(300px - 33px);overflow-y:auto">
               <span v-if="!logsStore.logs.length" class="log-empty">等待日志…</span>
               <span v-for="(l, i) in logsStore.logs.slice(-80)" :key="i"
                 class="log-line" :class="logCls(l)">{{ l }}<br></span>
