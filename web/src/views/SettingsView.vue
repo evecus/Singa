@@ -813,7 +813,6 @@ onMounted(() => {
     extraGIDRaw.value   = gid ? formatGID(gid) : ''
   }).catch(() => {})
 })
-})
 </script>
 
 <style scoped>
