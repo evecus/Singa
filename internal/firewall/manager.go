@@ -36,9 +36,9 @@ type Ports struct {
 // Apply sets up nftables rules for the chosen TCP/UDP proxy modes.
 // tunDevice is the TUN interface name configured by the user (e.g. "singa",
 // "tun0"). It is used in both the nft iifname match and the ip route rules.
-// extraGID, when non-zero, is an additional GID whose traffic is bypassed by
+// extraGIDs, when non-empty, are additional GIDs whose traffic is bypassed by
 // the firewall (in addition to the singa process GID).
-func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, extraGID uint32, ipf ipfilter.Config, fakeip bool) error {
+func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypassCN bool, tunDevice string, dataDir string, gid uint32, extraGIDs []uint32, ipf ipfilter.Config, fakeip bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -58,7 +58,7 @@ func Apply(modes config.ProxyModes, ports Ports, lanProxy bool, ipv6 bool, bypas
 		return nil
 	}
 
-	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, extraGID, ipf, fakeip); err != nil {
+	if err := setup(modes, ports, lanProxy, ipv6, bypassCN, tunDevice, gid, extraGIDs, ipf, fakeip); err != nil {
 		return fmt.Errorf("nft setup: %w", err)
 	}
 

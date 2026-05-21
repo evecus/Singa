@@ -86,10 +86,9 @@ type ProxySettings struct {
 	LanProxy    bool           `json:"lanProxy"`
 	IPv6        bool           `json:"ipv6"`
 	BypassCN    bool           `json:"bypassCN"`
-	// ExtraGID is an additional GID whose traffic is bypassed by the firewall
-	// (i.e. not intercepted by sing-box).  Zero means disabled.
-	// Stored as the numeric GID; the UI sends it as a string formatted "xx xx xxx".
-	ExtraGID uint32 `json:"extraGID"`
+	// ExtraGIDs is a list of additional GIDs whose traffic is bypassed by the firewall
+	// (i.e. not intercepted by sing-box).  Empty means disabled.
+	ExtraGIDs []uint32 `json:"extraGIDs"`
 }
 
 func (ps ProxySettings) toProxyModes() config.ProxyModes {
@@ -451,7 +450,7 @@ func (m *Manager) Start(p StartParams) error {
 		TProxy:   ports.TProxy,
 		Redirect: ports.Redirect,
 	}
-	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, ss.Inbound.TunInterface, m.dataDir, gid, ps.ExtraGID, ipf, ss.FakeIP); err != nil {
+	if err := firewall.Apply(modes, fwPorts, ps.LanProxy, ps.IPv6, ps.BypassCN, ss.Inbound.TunInterface, m.dataDir, gid, ps.ExtraGIDs, ipf, ss.FakeIP); err != nil {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
